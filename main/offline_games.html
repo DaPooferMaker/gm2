@@ -4,21 +4,58 @@
     <style>
         body {
             display:none;
+            margin:0px;
+            background-color:#121212;
         }
 
-        #OfflineGameButton {
-            height:20px;
+        #ParentDiv{
+            display:flex;
+            justify-content:start;
+            align-items:center;
+            flex-direction:column;
+            left:0;
+            top:0;
+            width:100vw;
+            height:100vh;
+            background-color:#121212;
+            
+        }
+
+        .OfflineGameButton {
+            display: flex;
+            flex-direction: row;
+            align-items: end;
+            justify-content: center;
+            flex-shrink:1;
+            min-width: 80px;
+            max-width: 150px;
+            aspect-ratio: 1 / 1;
+            height: auto;
+            width:147px;
+            font-size:15px;
+            color:#f7f7f7;;
+            background-color:#1e1e1e;
+            border-color:#2d2d2d;
+            border-width:5px;
+            text-shadow:#f7f7f7;
+            box-sizing: border-box
         }
 
         #GameList {
             width:100%;
-            height:400px;
+            height:100%;
+            flex: 1 1 calc(5% - 15px);
+            display:flex;
+            flex-direction:row;
+            gap:5px;
+            flex-wrap:wrap;
         }
+
 
         #TopNav {
             position:relative;
-            width:100vw;
-            height:5vh;
+            width:100%;
+            height:5%;
             display:flex;
             left:0px;
             top:0px;
@@ -135,10 +172,11 @@
     <div id="ParentDiv">
     <div id="TopNav">
         <button class="TopNav-button" onclick="window.location.href='offline_games.html';"> Offline Games </button>
+        <button class="TopNav-button" onclick="window.location.href='offline_games-src2.html';"> Offline Games Source 2 </button>
         <button class="TopNav-button" onclick="window.location.href='tools.html';"> Tools </button>
     </div>
 
-    <h1> Offline games! </h1>
+    <h1 style="color:#f7f7f7;"> Offline games! </h1>
 
     <div id="GameList">
 
@@ -217,7 +255,6 @@
     "cleanup-io.html",
     "cluster-rush.html",
     "cc-working",
-    "cc-k",
     "crazy-cars.html",
     "crazy-cattle-3D.html",
     "crazy-crash-landing.html",
@@ -457,7 +494,7 @@
 
             // Create a button
             const button = document.createElement("button");
-            button.id = "OfflineGameButton";
+            button.className = "OfflineGameButton";
             // Turn the filename into the button's name
             let gameName = gameFile;
 

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <style>
+        body {
+            display:none;
+            margin:0px;
+            background-color:#121212;
+        }
+
+        #ParentDiv{
+            display:flex;
+            justify-content:start;
+            align-items:center;
+            flex-direction:column;
+            left:0;
+            top:0;
+            width:100vw;
+            height:100vh;
+            background-color:#121212;
+            
+        }
+
+        .OfflineGameButton {
+            display: flex;
+            flex-direction: row;
+            align-items: end;
+            justify-content: center;
+            flex-shrink:1;
+            min-width: 80px;
+            max-width: 150px;
+            aspect-ratio: 1 / 1;
+            height: auto;
+            width:147px;
+            font-size:15px;
+            color:#f7f7f7;;
+            background-color:#1e1e1e;
+            border-color:#2d2d2d;
+            border-width:5px;
+            text-shadow:#f7f7f7;
+            box-sizing: border-box
+        }
+
+        #GameList {
+            width:100%;
+            height:100%;
+            flex: 1 1 calc(5% - 15px);
+            display:flex;
+            flex-direction:row;
+            gap:5px;
+            flex-wrap:wrap;
+        }
+
+
+        #TopNav {
+            position:relative;
+            width:100%;
+            height:5%;
+            display:flex;
+            left:0px;
+            top:0px;
+            background-color:#4B0082;
+            align-items: center;
+        }
+
+        .TopNav-button {
+            flex:1;
+            width:fit-content;
+            /* the right part of the calc is the margin for the top and bottom / 2 */
+            height:calc(100% - 10px);
+            margin:5px;
+            background-color:#8a2be2;
+            border-color:#8a2be2;
+            text-size-adjust: inherit;
+            font-size: calc(5vh - 14px);
+            font-family:Georgia, 'Times New Roman', Times, serif;  
+        }
+
+        .TopNav-button:hover {
+            opacity:80%;
+        }
+    </style>
+
+<script src="../fernet.txt"></script>
+
+    <script type="module">
+        const SALT = "my-fixed-salt-2026";
+        const ITERATIONS = 600000;
+
+        let encryptedMsg =
+            "gAAAAABqs0G7zdpt-VXK3T3rostZr14xz569fcgDae41Q-n31n0JBSwuwa0v_7GvZpjhbpDXTwX43MWy5StP7j_2uQFiaS2kXg==";
+
+        async function deriveFernetKey(password) {
+            const encoder = new TextEncoder();
+
+            const importedKey = await crypto.subtle.importKey(
+                "raw",
+                encoder.encode(password),
+                "PBKDF2",
+                false,
+                ["deriveBits"]
+            );
+
+            const derivedBits = await crypto.subtle.deriveBits(
+                {
+                    name: "PBKDF2",
+                    salt: encoder.encode(SALT),
+                    iterations: ITERATIONS,
+                    hash: "SHA-256"
+                },
+                importedKey,
+                256
+            );
+
+            const bytes = new Uint8Array(derivedBits);
+
+            let binary = "";
+
+            for (let i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+
+            return btoa(binary)
+                .replace(/\+/g, "-")
+                .replace(/\//g, "_");
+        }
+
+        async function decryptMessage(encryptedMsg, password) {
+            try {
+                const key = await deriveFernetKey(password);
+
+                const secret = new fernet.Secret(key);
+
+                const token = new fernet.Token({
+                    secret: secret,
+                    token: encryptedMsg,
+                    ttl: 0
+                });
+
+                return token.decode();
+
+            } catch (error) {
+                return null;
+            }
+        }
+
+        window.decryptMessage = decryptMessage;
+
+        let savedToken = localStorage.getItem("token");
+
+        if (savedToken !== null) {
+            console.log("redirecting...")
+            let decrypted_msg = await decryptMessage(encryptedMsg, savedToken);
+
+            if (decrypted_msg !== "PHWLK") {
+                window.location.href = "../index.html";
+
+            }
+            else{
+                document.body.style.display = "block"
+            }
+        }
+
+    </script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Games</title>
+
+</head>
+<body>
+    <div id="ParentDiv">
+    <div id="TopNav">
+        <button class="TopNav-button" onclick="window.location.href='offline_games.html';"> Offline Games </button>
+        <button class="TopNav-button" onclick="window.location.href='offline_games-src2.html';"> Offline Games Source 2 </button>
+        <button class="TopNav-button" onclick="window.location.href='tools.html';"> Tools </button>
+    </div>
+
+    <h1 style="color:#f7f7f7;"> Offline games! </h1>
+
+    <div id="GameList">
+
+    </div>
+    </div>
+
+    <script>
+
+        const games = [
+        "brotato.html",
+];
+
+        const gameList = document.getElementById("GameList");
+
+        games.forEach(function(gameFile) {
+
+            // Create a button
+            const button = document.createElement("button");
+            button.className = "OfflineGameButton";
+            // Turn the filename into the button's name
+            let gameName = gameFile;
+
+            // Remove .html
+            gameName = gameName.replace(/\.html$/i, "");
+
+            // Replace - and _ with spaces
+            gameName = gameName.replace(/[-_]/g, " ");
+
+            // Capitalize the first letter of each word
+            gameName = gameName.replace(/\b\w/g, function(letter) {
+                return letter.toUpperCase();
+            });
+
+            // Set the button text
+            button.textContent = gameName;
+
+            if (gameName == "Cc K"){
+                button.textContent = "cookie-clicker kaizo"
+            } 
+            if (gameName == "Cc Working"){
+                button.textContent = "cookie-clicker Working Version"
+            }
+
+            // When the button is clicked,
+            // open the game from the offline folder
+            button.onclick = async function() {
+                let password_token = localStorage.getItem('token')
+                let decrypted_password = await window.decryptMessage('gAAAAABqs0G7zdpt-VXK3T3rostZr14xz569fcgDae41Q-n31n0JBSwuwa0v_7GvZpjhbpDXTwX43MWy5StP7j_2uQFiaS2kXg==',password_token)
+                if (decrypted_password !== "PHWLK"){
+                    window.location.href = "index.html"
+                }
+                window.location.href = "../other_offline-html/" + gameFile
+            };
+
+            // Add the button to the page
+            gameList.appendChild(button);
+
+            // Put a space after each button
+            gameList.appendChild(document.createTextNode(" "));
+        });
+
+        function LoadStash() {
+            window.location.href = "game_stash.html";
+        }
+    </script>
+
+</body>
+</html>
