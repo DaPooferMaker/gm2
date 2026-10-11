@@ -6,6 +6,7 @@
             display:none;
             margin:0px;
             background-color:#121212;
+            overflow-x:hidden;
         }
 
         #ParentDiv{
@@ -31,20 +32,29 @@
             max-width: 150px;
             aspect-ratio: 1 / 1;
             height: auto;
-            width:147px;
-            font-size:15px;
+            width:auto;
+            font-size:15cqmin;
             color:#f7f7f7;;
             background-color:#1e1e1e;
             border-color:#2d2d2d;
             border-width:5px;
             text-shadow:#f7f7f7;
-            box-sizing: border-box
+            box-sizing: border-box;
+            flex:1 1 0;
+            container-type: size;
+        }
+
+        .OfflineGameButton-text{
+            font-size:15cqmin;
+            color:#f7f7f7;
+            text-shadow:#f7f7f7;
+
         }
 
         #GameList {
             width:100%;
             height:100%;
-            flex: 1 1 calc(5% - 15px);
+            flex: 1 1 0;
             display:flex;
             flex-direction:row;
             gap:5px;
@@ -211,14 +221,20 @@
             });
 
             // Set the button text
-            button.textContent = gameName;
+
+            let p_tag = document.createElement("p")
+            p_tag.textContent = gameName
+            p_tag.className= "OfflineGameButton-text"
 
             if (gameName == "Cc K"){
-                button.textContent = "cookie-clicker kaizo"
+                p_tag.textContent = "cookie-clicker kaizo"
             } 
             if (gameName == "Cc Working"){
-                button.textContent = "cookie-clicker Working Version"
+                p_tag.textContent = "cookie-clicker Working Version"
             }
+
+            button.appendChild(p_tag)
+
 
             // When the button is clicked,
             // open the game from the offline folder
@@ -228,7 +244,16 @@
                 if (decrypted_password !== "PHWLK"){
                     window.location.href = "index.html"
                 }
+                
+                if (gameFile == "cc-working"){
+                    window.location.href = "../offline/" + gameFile + "/index.html"
+                    return
+                }
+                if (gameFile == "cc-k"){
+                    window.location.href = "https://puffcodewebsite.b-cdn.net/offline/cc-k/index.html"
+                }
                 window.location.href = "../other_offline-html/" + gameFile
+                
             };
 
             // Add the button to the page
