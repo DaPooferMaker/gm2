@@ -1,0 +1,2620 @@
+"use strict";
+// game Object ********************************************************
+//*********************************************************************
+const simulation = {
+    loop() { }, //main game loop, gets set to normal or testing loop
+    normalLoop() {
+        level.exit.isDrawPending = false;
+        simulation.gravity();
+        // level.mirrorDoors.update();
+        Engine.update(engine, simulation.delta);
+        simulation.wipe();
+        simulation.textLog();
+        if (m.onGround) {
+            m.groundControl()
+        } else {
+            m.airControl()
+        }
+        m.move();
+        m.look();
+        simulation.camera();
+        level.custom();
+        powerUps.do();
+        mobs.draw();
+        // simulation.draw.cons();
+        simulation.draw.body();
+        if (!m.isTimeDilated) mobs.loop();
+        m.draw();
+        m.hold();
+        level.customTopLayer();
+        simulation.draw.drawMapPath();
+        b.fire();
+        b.bulletRemove();
+        b.bulletDraw();
+        if (!m.isTimeDilated) b.bulletDo();
+        simulation.drawCircle();
+        simulation.runEphemera();
+        // level.mirrorDoorsDraw();
+        if (level.exit.isDrawPending) level.exit.drawAndCheck(true);
+        ctx.restore();
+        simulation.drawCursor();
+    },
+    testingLoop() {
+        level.exit.isDrawPending = false;
+        simulation.gravity();
+        // level.mirrorDoors.update();
+        Engine.update(engine, simulation.delta);
+        simulation.wipe();
+        simulation.textLog();
+        if (m.onGround) {
+            m.groundControl()
+        } else {
+            m.airControl()
+        }
+        m.move();
+        m.look();
+        simulation.camera();
+        level.custom();
+        m.draw();
+        m.hold();
+        level.customTopLayer();
+        simulation.draw.wireFrame();
+        // level.mirrorDoorsDraw();
+        if (input.fire && m.fireCDcycle < m.cycle) {
+            m.fireCDcycle = m.cycle + 15; //fire cooldown       
+        }
+        simulation.draw.cons();
+        simulation.draw.testing();
+        simulation.drawCircle();
+        simulation.runEphemera();
+        simulation.constructCycle()
+        if (level.exit.isDrawPending) level.exit.drawAndCheck(true);
+        ctx.restore();
+        simulation.testingOutput();
+        simulation.drawCursor();
+    },
+    isTimeSkipping: false,
+    timeSkip(cycles = 60) {
+        simulation.isTimeSkipping = true;
+        for (let i = 0; i < cycles; i++) {
+            simulation.cycle++;
+            m.cycle++;
+            simulation.gravity();
+            // level.mirrorDoors.update();
+            Engine.update(engine, simulation.delta);
+            if (m.onGround) {
+                m.groundControl()
+            } else {
+                m.airControl()
+            }
+            m.move();
+            level.custom();
+            mobs.loop();
+            m.walk_cycle += m.flipLegs * m.Vx;
+            m.hold();
+            level.customTopLayer();
+            b.fire();
+            b.bulletRemove();
+            b.bulletDo();
+            simulation.runEphemera();
+        }
+        simulation.draw.flushMapPathRebuild();
+        simulation.isTimeSkipping = false;
+    },
+    timePlayerSkip(cycles = 60) {
+        simulation.isTimeSkipping = true;
+        for (let i = 0; i < cycles; i++) {
+            simulation.cycle++;
+            // m.walk_cycle += (m.flipLegs * m.Vx) * 0.5; //makes the legs look like they are moving fast this is just gonna run for each method call since it needs some tweaking
+            simulation.gravity();
+            // level.mirrorDoors.update();
+            Engine.update(engine, simulation.delta);
+            // level.custom();
+            // level.customTopLayer();
+            if (!m.isTimeDilated) mobs.loop();
+            if (m.fieldMode !== 7) m.hold();
+            b.bulletRemove();
+            if (!m.isTimeDilated) b.bulletDo();
+            simulation.runEphemera();
+        }
+        simulation.isTimeSkipping = false;
+    },
+    ephemera: [], //array that is used to store ephemera objects
+    pendingActions: [], //plain progress for callbacks that can outlive a level; saved in saveGame.state().runtime
+    queueAction(action) {
+        simulation.pendingActions.push(action)
+        simulation.runPendingAction(action)
+    },
+    runPendingAction(action) {
+        const queue = simulation.pendingActions
+        const cycle = () => {
+            //Loading or starting a run replaces the queue, so old callbacks cannot deliver rewards twice.
+            if (queue !== simulation.pendingActions || !queue.includes(action)) return
+            if (m.alive && simulation.stepPendingAction(action)) {
+                requestAnimationFrame(cycle)
+            } else {
+                if (action.type === "reality tech") m.isSwitchingWorlds = false
+                const index = queue.indexOf(action)
+                if (index !== -1) queue.splice(index, 1)
+            }
+        }
+        requestAnimationFrame(cycle)
+    },
+    resumePendingActions() {
+        for (const action of simulation.pendingActions) simulation.runPendingAction(action)
+    },
+    stepPendingAction(action) { //return true while this action still has work to do
+        switch (action.type) {
+            case "reality tech": {
+                if (m.cycle % 10) return true
+                if (action.remaining <= 0) return false
+                action.remaining--
+                const options = []
+                for (let i = 0; i < tech.tech.length; i++) {
+                    const t = tech.tech[i]
+                    if (t.count < t.maxCount && t.allowed() && !t.isBadRandomOption && !t.isLore && !t.isJunk && !t.isAltRealityTech && !tech.isNonDemolitionKept(t, action.keep ?? null)) { //localization only replaces the tech it didn't keep
+                        for (let j = 0; j < t.frequency; j++) options.push(i)
+                    }
+                }
+                if (options.length) tech.giveTech(options[Math.floor(Math.random() * options.length)])
+                return true
+            }
+            case "applied science": {
+                if (action.remaining <= 0) return false
+                if (simulation.paused || simulation.isChoosing) return true
+                action.remaining--
+                if (!(action.remaining % action.delay)) {
+                    action.gunIndex++
+                    if (b.inventory[action.gunIndex] !== undefined) tech.giveRandomGunTech(b.inventory[action.gunIndex])
+                }
+                return action.remaining > 0
+            }
+            case "quintessence": {
+                if (powerUps.research.count <= 0 || powerUps.research.count === Infinity) return false
+                if (simulation.paused || simulation.isChoosing) return true
+                const t = tech.tech.find(entry => entry.name === "quintessence")
+                if (!t) return false
+                powerUps.research.changeRerolls(-1)
+                t.researchUsed++
+                powerUps.spawnDelay("coupling", t.couplingToResearch)
+                return powerUps.research.count > 0
+            }
+            case "needles": {
+                if (simulation.paused || m.isTimeDilated) return true
+                action.count++
+                if (action.count % 2) {
+                    const needle = b.needle()
+                    if (tech.isIceCrystals) needle.isIceNeedle = true
+                }
+                return action.count < action.end
+            }
+        }
+        return false
+    },
+    removeEphemera: function (who, isRemoveByName) {
+        if (isRemoveByName) { //who is a string
+            for (let i = 0, len = simulation.ephemera.length; i < len; i++) {
+                if (simulation.ephemera[i].name === who) {
+                    simulation.ephemera.splice(i, 1);
+                    break;
+                }
+            }
+        } else {
+            for (let i = 0, len = simulation.ephemera.length; i < len; i++) {
+                if (simulation.ephemera[i] === who) {
+                    simulation.ephemera.splice(i, 1);
+                    break;
+                }
+            }
+        }
+    },
+    runEphemera() {
+        // for (let i = 0; i < simulation.ephemera.length; i++) {
+        for (let i = simulation.ephemera.length - 1; i >= 0; i--) {
+            simulation.ephemera[i]?.do(); //death can clear ephemera during a callback
+        }
+    },
+    // timeMobSkip() {
+    //     simulation.gravity();
+    //     Engine.update(engine, simulation.delta);
+    //     simulation.wipe();
+    //     simulation.textLog();
+    //     if (m.onGround) {
+    //         m.groundControl()
+    //     } else {
+    //         m.airControl()
+    //     }
+    //     m.move();
+    //     m.look();
+    //     simulation.camera();
+    //     level.custom();
+    //     powerUps.do();
+    //     mobs.draw();
+    //     simulation.draw.cons();
+    //     simulation.draw.body();
+    //     if (!m.isTimeDilated) {
+    //         // mobs.loop();
+    //     }
+    //     m.draw();
+    //     m.hold();
+    //     // v.draw(); //working on visibility work in progress
+    //     level.customTopLayer();
+    //     simulation.draw.drawMapPath();
+    //     b.fire();
+    //     b.bulletRemove();
+    //     b.bulletDraw();
+    //     if (!m.isTimeDilated) b.bulletDo();
+    //     simulation.drawCircle();
+    //     // simulation.clip();
+    //     ctx.restore();
+    //     simulation.drawCursor();
+    //     // simulation.pixelGraphics();
+    // },
+    mouse: {
+        x: canvas.width / 2,
+        y: canvas.height / 2
+    },
+    mouseInGame: {
+        x: 0,
+        y: 0
+    },
+    g: 0.0024, // applies to player, bodies, and power ups  (not mobs)
+    onTitlePage: true,
+    isCheating: false,
+    isTraining: false,
+    paused: false,
+    isChoosing: false,
+    testing: false, //testing mode: shows wire frame and some variables
+    cycle: 600, //total cycles, 60 per second
+    fpsCap: null, //limits frames per second to 144/2=72,  on most monitors the fps is capped at 60fps by the hardware
+    fpsCapDefault: 72, //use to change fpsCap back to normal after a hit from a mob
+    isCommunityMaps: false,
+    isStartingGame: false,
+    cyclePaused: 0,
+    fallHeight: 6000, //below this y position the player will teleport to start, take damage, or teleport to the sky based on the value of  level.fallMode
+    lastTimeStamp: 0, //tracks time stamps for measuring delta
+    delta: 1000 / 60, //speed of game engine //looks like it has to be 16.6666 to match player input
+    buttonCD: 0,
+    isHorizontalFlipped: false, //makes some maps flipped horizontally
+    levelsCleared: 0,
+    difficultyOptions: {}, //individual difficulty effects; initialized from saved settings
+    difficultyMode: 2, //derived numeric scale for legacy enemy tuning and community maps
+    difficulty: 0,
+    constraint: 0,
+    healScale: 1,
+    accelScale: null,
+    CDScale: null,
+    molecularMode: Math.floor(5 * Math.random()), //0 spores, 1 missile, 2 ice IX, 3 drones, 4 following needles //randomize molecular assembler field type
+
+    drawCursor() {
+        const size = 10;
+        ctx.beginPath();
+        ctx.moveTo(simulation.mouse.x - size, simulation.mouse.y);
+        ctx.lineTo(simulation.mouse.x + size, simulation.mouse.y);
+        ctx.moveTo(simulation.mouse.x, simulation.mouse.y - size);
+        ctx.lineTo(simulation.mouse.x, simulation.mouse.y + size);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#000"; //'rgba(0,0,0,0.4)'
+        ctx.stroke(); // Draw it
+    },
+    drawCursorBasic() {
+        const size = 10;
+        ctx.beginPath();
+        ctx.moveTo(simulation.mouse.x - size, simulation.mouse.y);
+        ctx.lineTo(simulation.mouse.x + size, simulation.mouse.y);
+        ctx.moveTo(simulation.mouse.x, simulation.mouse.y - size);
+        ctx.lineTo(simulation.mouse.x, simulation.mouse.y + size);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#000"; //'rgba(0,0,0,0.4)'
+        ctx.stroke(); // Draw it
+    },
+    drawCursorCoolDown() {
+        const size = 10;
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = tech.isShotgunTiming && m.cycle < tech.shotgunTimingEndCycle ? "#f03" : "#000";
+        ctx.beginPath();
+        if (m.fireCDcycle > m.cycle) {
+            ctx.arc(simulation.mouse.x, simulation.mouse.y, size + 1, 0, 2 * Math.PI);
+        }
+        ctx.moveTo(simulation.mouse.x - size, simulation.mouse.y);
+        ctx.lineTo(simulation.mouse.x + size, simulation.mouse.y);
+        ctx.moveTo(simulation.mouse.x, simulation.mouse.y - size);
+        ctx.lineTo(simulation.mouse.x, simulation.mouse.y + size);
+        ctx.stroke(); // Draw it
+    },
+    drawList: [], //so you can draw a first frame of explosions.. I know this is bad
+    drawTime: 8, //how long circles are drawn.  use to push into drawlist.time
+    mobDmgColor: "rgba(255,0,0,0.7)", //color when a mob damages the player  // set by mass-energy tech
+    playerDmgColor: "rgba(0,0,0,0.7)", //color when the player damages a mob
+    drawCircle() {
+        //draws a circle for two cycles, used for showing damage mostly
+        let i = simulation.drawList.length;
+        while (i--) {
+            ctx.beginPath(); //draw circle
+            ctx.arc(simulation.drawList[i].x, simulation.drawList[i].y, simulation.drawList[i].radius, 0, 2 * Math.PI);
+            ctx.fillStyle = simulation.drawList[i].color;
+            ctx.fill();
+            if (simulation.drawList[i].time) {
+                simulation.drawList[i].time--;
+            } else {
+                if (!m.isTimeDilated) simulation.drawList.splice(i, 1); //remove when timer runs out
+            }
+        }
+    },
+    circleFlare(dup, loops = 100) {
+        let boltNum, colors, loop
+        if (!localSettings.isHideHUD) {
+            boltNum = dup * 300
+            const bolts = []
+            colors = [powerUps.research.color, powerUps.ammo.color, powerUps.heal.color, powerUps.tech.color, powerUps.field.color, powerUps.gun.color]
+            for (let i = 0; i < boltNum; ++i) {
+                const mag = 6 + 20 * Math.random()
+                const angle = 2 * Math.PI * Math.random()
+                bolts.push({
+                    x: m.pos.x,
+                    y: m.pos.y,
+                    Vx: mag * Math.cos(angle),
+                    Vy: mag * Math.sin(angle),
+                    color: colors[Math.floor(Math.random() * colors.length)]
+                })
+            }
+            let count = 0
+            loop = () => { //draw electricity
+                if (count++ < loops) requestAnimationFrame(loop)
+                for (let i = 0, len = bolts.length; i < len; ++i) {
+                    bolts[i].x += bolts[i].Vx
+                    bolts[i].y += bolts[i].Vy
+                    if (Math.random() < 0.2) {
+                        simulation.drawList.push({
+                            x: bolts[i].x,
+                            y: bolts[i].y,
+                            radius: 1.5 + 5 * Math.random(),
+                            // color: "rgba(0,155,155,0.7)",
+                            color: bolts[i].color,
+                            time: Math.floor(9 + 25 * Math.random() * Math.random())
+                        });
+                    }
+                }
+            }
+            requestAnimationFrame(loop)
+        }
+    },
+    boldActiveGunHUD() {
+        if (b.inventory.length > 0) {
+            for (let i = 0, len = b.inventory.length; i < len; ++i) {
+                if (b.inventory[i] === b.activeGun && document.getElementById(b.activeGun)) {
+                    document.getElementById(b.inventory[i]).style.opacity = "1";
+                } else {
+                    document.getElementById(b.inventory[i]).style.opacity = "0.3";
+                }
+            }
+        }
+    },
+    updateGunHUD() {
+        for (let i = 0, len = b.inventory.length; i < len; ++i) {
+            document.getElementById(b.inventory[i]).innerHTML = `${b.guns[b.inventory[i]].name} - ${b.guns[b.inventory[i]].ammo}`
+        }
+    },
+    makeGunHUD() {
+        //remove all nodes
+        const myNode = document.getElementById("guns");
+        while (myNode.firstChild) {
+            myNode.removeChild(myNode.firstChild);
+        }
+        //add nodes
+        for (let i = 0, len = b.inventory.length; i < len; ++i) {
+            const node = document.createElement("div");
+            node.setAttribute("id", b.inventory[i]);
+            const textNode = document.createTextNode(`${b.guns[b.inventory[i]].name} - ${b.guns[b.inventory[i]].ammo}`); //b.guns[b.inventory[i]].name + " - " + b.guns[b.inventory[i]].ammo);
+            node.appendChild(textNode);
+            document.getElementById("guns").appendChild(node);
+        }
+        simulation.boldActiveGunHUD();
+    },
+    updateTechHUD() {
+        let text = ""
+        for (let i = 0, len = tech.tech.length; i < len; i++) { //add tech
+            if (tech.tech[i].isLost) {
+                if (text) text += "<br>" //add a new line, but not on the first line
+                text += `<span style="text-decoration: line-through;">${tech.tech[i].name}</span>`
+            } else if (tech.tech[i].count > 0 && !tech.tech[i].isInstant) {
+                if (text) text += "<br>" //add a new line, but not on the first line
+                text += tech.tech[i].name
+                if (tech.tech[i].count > 1) text += ` (${tech.tech[i].count}x)`
+            }
+        }
+        document.getElementById("right-HUD").innerHTML = text
+    },
+    dmgNumbers(where, dmg, color = "rgba(255, 0, 17,", size = 45, isOutline = false) {
+        if (localSettings.showDmgNumbers && dmg > 0) {
+            simulation.ephemera.push({
+                count: 0,
+                drift: { x: (0.6 * Math.random()) * (Math.random() < 0.5 ? -1 : 1), y: 1 + 0.5 * Math.random() },
+                font: `${size}px Arial`,
+                do() {
+                    let pos
+                    this.count++
+                    if (this.count > size) {
+                        simulation.removeEphemera(this)
+                    } else {
+                        const opacity = Math.max(0, (2 * (60 - this.count)) / 60)
+                        ctx.fillStyle = `${color}${opacity})`;
+                        ctx.font = this.font;
+                        pos = Vector.add(where, Vector.mult(this.drift, -this.count))
+                        if (isOutline) {
+                            ctx.strokeStyle = `rgba(0,0,0,${opacity})`//"#000"
+                            ctx.lineWidth = 2;
+                            ctx.strokeText(dmg, pos.x, pos.y);
+                        }
+                        ctx.fillText(dmg, pos.x, pos.y);
+                    }
+                },
+            })
+        }
+    },
+    lastLogTime: 0,
+    isTextLogOpen: true,
+    consoleLength: 0,
+    inGameConsole(text, time = 240) {
+        if (!localSettings.isHideHUD && simulation.isTextLogOpen && !build.isExperimentSelection) {
+            if (simulation.lastLogTime > m.cycle && simulation.consoleLength < 30) { //if there is an older message
+                document.getElementById("text-log").innerHTML = document.getElementById("text-log").innerHTML + '<br>' + text;
+                simulation.lastLogTime = m.cycle + time;
+                simulation.consoleLength++
+            } else {
+                document.getElementById("text-log").innerHTML = text;
+                document.getElementById("text-log").style.display = "inline";
+                simulation.lastLogTime = m.cycle + time;
+                simulation.consoleLength = 0
+            }
+        }
+    },
+    textLog() {
+        if (simulation.lastLogTime && simulation.lastLogTime < m.cycle) {
+            simulation.lastLogTime = 0;
+            // document.getElementById("text-log").innerHTML = " ";
+            document.getElementById("text-log").style.display = "none";
+        }
+    },
+    nextGun() {
+        if (b.inventory.length > 1 && !(tech.isGunCycle || tech.isGunChoice)) {
+            b.inventoryGun++;
+            if (b.inventoryGun > b.inventory.length - 1) b.inventoryGun = 0;
+            simulation.switchGun();
+        }
+    },
+    previousGun() {
+        if (b.inventory.length > 1 && !(tech.isGunCycle || tech.isGunChoice)) {
+            b.inventoryGun--;
+            if (b.inventoryGun < 0) b.inventoryGun = b.inventory.length - 1;
+            simulation.switchGun();
+        }
+    },
+    switchToGunInInventory(num) {
+        if (b.inventory[num] !== undefined && b.inventoryGun !== num) {
+            b.inventoryGun = num
+            simulation.switchGun();
+        }
+    },
+    switchGun() {
+        if (!tech.isTransverse && b.activeGun === 3) b.guns[3].waves = []; //empty array of longitudinal wave bullets
+        if (tech.crouchAmmoCount) tech.crouchAmmoCount = 1 //this prevents hacking the tech by switching guns
+        if (b.inventory.length > 0) b.activeGun = b.inventory[b.inventoryGun];
+        b.guns[8].charge = 0; // foam charge to 0
+        simulation.updateGunHUD();
+        simulation.boldActiveGunHUD();
+        //set crosshairs
+        if (b.activeGun === 1) {
+            simulation.drawCursor = simulation.drawCursorCoolDown
+        } else {
+            simulation.drawCursor = simulation.drawCursorBasic
+        }
+        // b.setFireMethod()
+    },
+    zoom: null,
+    zoomScale: 1000,
+    isAutoZoom: true,
+    setZoom(zoomScale = simulation.zoomScale) { //use in window resize in index.js
+        simulation.zoomScale = zoomScale
+        simulation.zoom = canvas.height / zoomScale; //sets starting zoom scale
+    },
+    zoomTransition(newZoomScale, step = 2) {
+        //old version
+        // if (simulation.isAutoZoom) {
+        //     const isBigger = (newZoomScale - simulation.zoomScale > 0) ? true : false;
+        //     requestAnimationFrame(zLoop);
+        //     const currentLevel = level.onLevel
+
+        //     function zLoop() {
+        //         if (currentLevel !== level.onLevel || simulation.isAutoZoom === false) return //stop the zoom if player goes to a new level
+
+        //         if (isBigger) {
+        //             simulation.zoomScale += step
+        //             if (simulation.zoomScale >= newZoomScale) {
+        //                 simulation.setZoom(newZoomScale);
+        //                 return
+        //             }
+        //         } else {
+        //             simulation.zoomScale -= step
+        //             if (simulation.zoomScale <= newZoomScale) {
+        //                 simulation.setZoom(newZoomScale);
+        //                 return
+        //             }
+        //         }
+
+        //         simulation.setZoom();
+        //         requestAnimationFrame(zLoop);
+        //     }
+        // }
+
+
+        //rewrite using the ephemera system
+        if (simulation.isAutoZoom) {
+            simulation.ephemera.push({
+                name: "zoom",
+                count: simulation.testing ? 1 : 120, //cycles before it self removes
+                currentLevel: level.onLevel,
+                do() {
+                    this.count--
+                    const step = (newZoomScale - simulation.zoomScale) / this.count
+                    simulation.zoomScale += step
+                    if (this.count < 1 && simulation.isAutoZoom) {
+                        simulation.zoomScale = newZoomScale
+                        simulation.removeEphemera(this)
+                    }
+                    simulation.setZoom(simulation.zoomScale);
+                },
+            })
+        }
+    },
+    isInvertedVertical: false,
+    flipCameraVertical(frames = 1, passFunction = () => { }) {
+        if (!simulation.isInvertedVertical) {
+            if (frames > 0) {
+                let count = 0
+                const loop = () => {
+                    if (m.alive) {
+                        if (simulation.paused) {
+                            requestAnimationFrame(loop);
+                        } else {
+                            count++
+                            ctx.setTransform(1, 0, 0, 1, 0, 0); ///reset to avoid build up of transformations
+                            if (count === frames) {
+                                // Flip the canvas vertically
+                                ctx.translate(0, canvas.height); // Move the origin down to the bottom
+                                ctx.scale(1, -1); // Flip vertically
+                                //flip mouse Y again to make sure it caught
+                                // mouseMove.reset()
+                            } else {
+                                requestAnimationFrame(loop);
+                                ctx.translate(0, canvas.height * count / frames);
+                                ctx.scale(1, 1 - 2 * count / frames);
+                            }
+                            if (count > Math.floor(frames / 2) && !simulation.isInvertedVertical) {
+                                //flip mouse Y at the 1/2 way point
+                                simulation.isInvertedVertical = true
+                                mouseMove.reset()
+                                simulation.mouse.y = canvas.height - simulation.mouse.y
+                                //passFunction probably flips the map elements 
+                                passFunction()
+                            }
+                        }
+                    }
+                }
+                requestAnimationFrame(loop);
+            } else {
+                // Flip the canvas vertically
+                ctx.translate(0, canvas.height); // Move the origin down to the bottom
+                ctx.scale(1, -1); // Flip vertically
+                //flip mouse Y
+                simulation.isInvertedVertical = true
+                mouseMove.reset()
+                simulation.mouse.y = canvas.height - simulation.mouse.y
+
+            }
+        }
+    },
+    unFlipCameraVertical(frames = 0, passFunction = () => { }) {
+        if (frames) {
+            let count = 0
+            const loop = () => {
+                if (m.alive) {
+                    if (simulation.paused) {
+                        requestAnimationFrame(loop);
+                    } else {
+                        count++
+                        ctx.setTransform(1, 0, 0, 1, 0, 0); ///reset to avoid build up of transformations
+                        if (count === frames) {
+                            // requestAnimationFrame(() => { ctx.reset(); });
+                            // ctx.translate(0, 0);
+                            // ctx.scale(1, 1);
+
+                            //flip mouse Y again to make sure it caught
+                            // mouseMove.reset()
+
+                        } else {
+                            requestAnimationFrame(loop);
+                            ctx.translate(0, canvas.height - canvas.height * count / frames);
+                            ctx.scale(1, -1 + 2 * count / frames);
+                        }
+                        if (count > Math.floor(frames / 2) && simulation.isInvertedVertical) {
+                            simulation.isInvertedVertical = false
+                            //flip mouse Y at the 1/2 way point
+                            mouseMove.reset()
+                            simulation.mouse.y = canvas.height - simulation.mouse.y
+
+                            passFunction()//passFunction probably draws new map elements 
+                        }
+                    }
+                }
+            }
+            requestAnimationFrame(loop);
+        } else {
+            ctx.reset();
+            ctx.font = "25px Arial";
+            simulation.isInvertedVertical = false
+            mouseMove.reset()
+            simulation.mouse.y = canvas.height - simulation.mouse.y
+
+        }
+    },
+    translatePlayerAndCamera(where, isTranslateBots = true) {
+        //infinite falling.  teleport to sky after falling
+        const before = { x: player.position.x, y: player.position.y, }
+        Matter.Body.setPosition(player, { x: where.x, y: where.y });
+        const change = { x: before.x - player.position.x, y: before.y - player.position.y }
+        // translate camera to preserve illusion to endless fall
+        m.transX += change.x
+        m.transY += change.y
+        simulation.mouseInGame.x = (simulation.mouse.x - canvas.width2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.width2 - m.transX;
+        simulation.mouseInGame.y = (simulation.mouse.y - canvas.height2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.height2 - m.transY;
+
+        m.angle = Math.atan2(simulation.mouseInGame.y - m.pos.y, simulation.mouseInGame.x - m.pos.x);
+
+        //is there a reason to update m.pos here?
+        // m.pos.x = player.position.x;
+        // m.pos.y = playerBody.position.y - m.yOff;
+        if (isTranslateBots) {
+            for (let i = 0; i < bullet.length; i++) {
+                if (bullet[i].botType) {
+                    if (Vector.magnitudeSquared(Vector.sub(bullet[i].position, player.position)) > 1000000) { //far away bots teleport to player
+                        Matter.Body.setPosition(bullet[i], Vector.add(player.position, { x: 250 * (Math.random() - 0.5), y: 250 * (Math.random() - 0.5) }));
+                        Matter.Body.setVelocity(bullet[i], { x: 0, y: 0 });
+                    } else { //close bots maintain relative distance to player on teleport
+                        Matter.Body.setPosition(bullet[i], Vector.sub(bullet[i].position, change));
+                    }
+                }
+            }
+
+            if (tech.wire && tech.wire.segments.length) {
+                requestAnimationFrame(() => {
+                    const r = 32 * player.scale
+                    const a = m.angle + Math.PI
+                    for (let i = 0; i < tech.wire.segments.length; i++) {
+                        tech.wire.segments[i].y = tech.wire.segments[i].oldY = m.pos.y + (r * Math.sin(a))
+                        tech.wire.segments[i].x = tech.wire.segments[i].oldX = m.pos.x + (r * Math.cos(a))
+                    }
+                })
+            }
+        }
+    },
+    setupCamera() { //makes the camera not scroll after changing locations
+        // only works if velocity is zero
+        m.pos.x = player.position.x;
+        m.pos.y = playerBody.position.y - m.yOff;
+        const scale = 0.8;
+        m.transSmoothX = canvas.width2 - m.pos.x - (simulation.mouse.x - canvas.width2) * scale;
+        m.transSmoothY = canvas.height2 - m.pos.y - (simulation.mouse.y - canvas.height2) * scale;
+        m.transX += (m.transSmoothX - m.transX);
+        m.transY += (m.transSmoothY - m.transY);
+    },
+    edgeZoomOutSmooth: 1,
+    camera() {
+        //zoom out when mouse gets near the edge of the window
+        const dx = simulation.mouse.x / window.innerWidth - 0.5 //x distance from mouse to window center scaled by window width
+        const dy = simulation.mouse.y / window.innerHeight - 0.5 //y distance from mouse to window center scaled by window height
+        const d = Math.max(dx * dx, dy * dy)
+        simulation.edgeZoomOutSmooth = (1 + 4 * d * d) * 0.04 + simulation.edgeZoomOutSmooth * 0.96
+
+        ctx.save();
+        ctx.translate(canvas.width2, canvas.height2); //center
+        ctx.scale(simulation.zoom / simulation.edgeZoomOutSmooth, simulation.zoom / simulation.edgeZoomOutSmooth); //zoom in once centered
+        ctx.translate(-canvas.width2 + m.transX, -canvas.height2 + m.transY); //translate
+        // ctx.translate(-canvas.width2 + m.transX - player.velocity.x, -canvas.height2 + m.transY + player.velocity.y); //translate
+        //calculate in game mouse position by undoing the zoom and translations
+        simulation.mouseInGame.x = (simulation.mouse.x - canvas.width2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.width2 - m.transX;
+        simulation.mouseInGame.y = (simulation.mouse.y - canvas.height2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.height2 - m.transY;
+    },
+    //for moving camera away from player
+    setCameraPosition(x, y, zoom = 1) {
+        ctx.restore();
+        ctx.save();
+        ctx.translate(canvas.width2, canvas.height2); //center
+        ctx.scale(zoom, zoom); //zoom in once centered
+        ctx.translate(- x, - y); //center
+
+        // ctx.scale(simulation.zoom / simulation.edgeZoomOutSmooth, simulation.zoom / simulation.edgeZoomOutSmooth); //zoom in once centered
+        // ctx.translate(-canvas.width2, -canvas.height2); //translate
+        //calculate in game mouse position by undoing the zoom and translations
+        simulation.mouseInGame.x = (simulation.mouse.x - canvas.width2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.width2 - m.transX;
+        simulation.mouseInGame.y = (simulation.mouse.y - canvas.height2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.height2 - m.transY;
+    },
+    cameraNoLook() {
+        ctx.save();
+        ctx.translate(canvas.width2, canvas.height2); //center
+        // ctx.scale(simulation.zoom / simulation.edgeZoomOutSmooth, simulation.zoom / simulation.edgeZoomOutSmooth); //zoom in once centered
+        ctx.translate(-canvas.width2 + m.transX, -canvas.height2 + m.transY); //translate
+        //calculate in game mouse position by undoing the zoom and translations
+        simulation.mouseInGame.x = (simulation.mouse.x - canvas.width2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.width2 - m.transX;
+        simulation.mouseInGame.y = (simulation.mouse.y - canvas.height2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.height2 - m.transY;
+    },
+    restoreCamera() {
+        ctx.restore();
+    },
+    energyGenGraphic(totalCycles = 10 + Math.floor(Math.random() * 20)) {
+        if (m.immuneCycle >= m.cycle || m.isTimeDilated) return
+        //energy generation animation
+        if (!localSettings.isHideHUD) {
+            simulation.ephemera.push({
+                where: { x: m.pos.x + 45 * (Math.random() - 0.5), y: m.pos.y + Math.random() * 100 },
+                count: totalCycles,
+                r: 1.5 + 3 * Math.random(),
+                do() {
+                    this.count--
+                    if (this.count < 0) simulation.removeEphemera(this)
+                    this.where.y -= 3
+
+                    ctx.beginPath();
+                    ctx.arc(this.where.x, this.where.y, this.r, 0, 2 * Math.PI);
+                    ctx.fillStyle = m.fieldMeterColor
+                    ctx.fill();
+                },
+            })
+        }
+    },
+    trails(swapPeriod = 150) {
+        // const swapPeriod = 150
+        const len = 30
+        for (let i = 0; i < len; i++) {
+            setTimeout(function () {
+                simulation.wipe = function () { //set wipe to have trails
+                    ctx.fillStyle = `rgba(221,221,221,${i * i * 0.0005 + 0.0025})`;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+            }, (i) * swapPeriod);
+        }
+
+        setTimeout(function () {
+            simulation.wipe = function () { //set wipe to normal
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }, len * swapPeriod);
+    },
+    wipe() { }, //set in simulation.startGame
+    warmedShaders: new Set(), //effects already drawn by simulation.warmShaders, the GPU keeps their shaders until the page reloads
+    warmShaders() { //the first time some effects are drawn, the GPU can freeze the game for ~0.3s while it builds new shaders
+        //called after a choice, before unpausing, so the freeze happens while the choice menu is still up
+        //an effect opts in with a warmUp() that draws it at the player the way the game does, in each state that looks different to the GPU
+        let isDrawn = false
+        for (const effect of [m.fieldUpgrades[m.fieldMode], ...tech.tech]) {
+            if (effect.warmUp && (effect === m.fieldUpgrades[m.fieldMode] || effect.count > 0) && !simulation.warmedShaders.has(effect.name)) {
+                simulation.warmedShaders.add(effect.name)
+                ctx.save()
+                ctx.setTransform(1, 0, 0, 1, 0, 0)
+                simulation.camera() //the next frame wipes these draws before they're seen
+                effect.warmUp()
+                ctx.restore()
+                ctx.restore()
+                isDrawn = true
+            }
+        }
+        if (isDrawn) { //copy the canvas and read a pixel, which waits for the GPU to finish the draws
+            const copy = document.createElement("canvas")
+            copy.width = 512 //smaller canvases might not use the GPU
+            copy.height = 512
+            const copyCtx = copy.getContext("2d")
+            copyCtx.drawImage(canvas, 0, 0, 1, 1)
+            copyCtx.getImageData(0, 0, 1, 1)
+        }
+    },
+    gravity() {
+        function addGravity(bodies, magnitude) {
+            for (var i = 0; i < bodies.length; i++) {
+                bodies[i].force.y += bodies[i].mass * magnitude;
+            }
+        }
+        if (!m.isTimeDilated) {
+            addGravity(powerUp, simulation.g);
+            addGravity(body, simulation.g);
+        }
+        player.force.y += player.mass * simulation.g;
+    },
+    firstRun: true,
+    splashReturn() {
+        mouseMove.unlock()
+        document.getElementById("previous-seed").innerHTML = `previous seed: <span style="font-size:80%;">${Math.initialSeed}</span><br>`
+        document.getElementById("seed").value = Math.initialSeed = Math.seed //randomize initial seed
+
+        //String(document.getElementById("seed").value)
+        // Math.seed = Math.abs(Math.hash(Math.initialSeed)) //update randomizer seed in case the player changed it
+
+        canvas.style.filter = "brightness(1)"
+        simulation.clearTimeouts();
+        simulation.onTitlePage = true;
+        document.getElementById("splash").onclick = function () {
+            simulation.startGame();
+        };
+        document.getElementById("choose-grid").style.visibility = "hidden"
+        document.getElementById("choose-grid").style.opacity = "0"
+        document.getElementById("info").style.display = "inline";
+        document.getElementById("info").style.opacity = "0";
+        document.getElementById("experiment-button").style.display = "inline"
+        document.getElementById("experiment-button").style.opacity = "0";
+        document.getElementById("training-button").style.display = "inline"
+        document.getElementById("training-button").style.opacity = "0";
+        document.getElementById("start-button").style.display = "inline"
+        document.getElementById("start-button").style.opacity = "0";
+        saveGame.updateContinueButton()
+        document.getElementById("continue-button").style.opacity = "0";
+        document.getElementById("experiment-grid").style.display = "none"
+        document.getElementById("pause-grid-left").style.display = "none"
+        document.getElementById("pause-grid-right").style.display = "none"
+        document.getElementById("splash").style.display = "inline";
+        document.getElementById("splash").style.opacity = "0";
+        document.getElementById("dmg").style.display = "none";
+        document.getElementById("health-bg").style.display = "none";
+        document.getElementById("defense-bar").style.display = "none"
+        document.body.style.cursor = "auto";
+        setTimeout(() => {
+            document.getElementById("experiment-button").style.opacity = "1";
+            document.getElementById("training-button").style.opacity = "1";
+            document.getElementById("start-button").style.opacity = "1";
+            document.getElementById("continue-button").style.opacity = "1";
+            document.getElementById("info").style.opacity = "1";
+            document.getElementById("splash").style.opacity = "1";
+        }, 200);
+    },
+    fpsInterval: 0, //set in startGame
+    then: null,
+    async startGame(isBuildRun = false, isTrainingRun = false) {
+        let i, len
+        if (simulation.isStartingGame) return
+        simulation.isStartingGame = true
+        //request before any await so it still counts as part of the click that started the game, fullscreenchange locks the mouse
+        if (localSettings.isAutoFullscreen && !document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(err => console.error('Error attempting to enable fullscreen:', err));
+        }
+        if (simulation.isCommunityMaps || isTrainingRun) {
+            try {
+                await level.loadMoreLevels()
+            } catch (error) {
+                simulation.isStartingGame = false
+                console.error(error)
+                return
+            }
+        }
+        simulation.isStartingGame = false
+        simulation.draw.body = simulation.draw.bodyDefault //undo a community map's custom block drawing from the last run
+        simulation.isTextLogOpen = true
+        simulation.clearMap()
+        level.pendingTransfers = null //a fresh run never inherits arrivals from the previous run
+        if (!isBuildRun) { //if a build run logic flow returns to "experiment-button").addEventListener
+            document.body.style.cursor = "none";
+            document.body.style.overflow = "hidden"
+        }
+        if (isTrainingRun) {
+            simulation.isTraining = true
+        } else {
+            simulation.isTraining = false
+        }
+        simulation.difficultyOptions = powerUps.difficulty.normalize(simulation.isTraining ? {} : localSettings.difficultyOptions)
+        powerUps.difficulty.updateScale()
+        simulation.onTitlePage = false;
+        // document.getElementById("choose-grid").style.display = "none"
+        document.getElementById("choose-grid").style.visibility = "hidden"
+        document.getElementById("choose-grid").style.opacity = "0"
+        document.getElementById("experiment-grid").style.display = "none"
+        document.getElementById("info").style.display = "none";
+        document.getElementById("experiment-button").style.display = "none";
+        document.getElementById("training-button").style.display = "none";
+        document.getElementById("start-button").style.display = "none";
+        document.getElementById("continue-button").style.display = "none";
+        // document.getElementById("experiment-button").style.opacity = "0";
+        document.getElementById("splash").onclick = null; //removes the onclick effect so the function only runs once
+        document.getElementById("splash").style.display = "none"; //hides the element that spawned the function
+        document.getElementById("dmg").style.display = "inline";
+        document.getElementById("health").style.display = "inline"
+        document.getElementById("health-bg").style.display = "inline";
+        if (!localSettings.isHideHUD) {
+            document.getElementById("right-HUD").style.display = "inline"
+            document.getElementById("defense-bar").style.display = "inline"
+        } else {
+            document.getElementById("right-HUD").style.display = "none"
+            document.getElementById("defense-bar").style.display = "none"
+        }
+        document.getElementById("guns").style.display = "inline"
+        document.getElementById("field").style.display = "inline"
+
+        // document.body.style.overflow = "hidden"
+        document.getElementById("pause-grid-left").style.display = "none"
+        document.getElementById("pause-grid-right").style.display = "none"
+        document.getElementById("pause-grid-right").style.opacity = "1"
+        document.getElementById("pause-grid-left").style.opacity = "1"
+        ctx.globalCompositeOperation = "source-over"
+        ctx.shadowBlur = 0;
+
+        mouseMove.reset()
+        requestAnimationFrame(() => {
+            ctx.setTransform(1, 0, 0, 1, 0, 0); //reset warp effect
+            ctx.setLineDash([]) //reset stroke dash effect
+        })
+        // ctx.shadowColor = '#000';
+        if (!m.isShipMode) {
+            m.resetSkin() //set the play draw to normal, undoing some junk tech
+            m.spawn(); //spawns the player
+            m.look = m.lookDefault
+        } else {
+            Composite.add(engine.world, [player])
+        }
+        seededShuffle(level.constraint)
+        level.populateLevels()
+        input.endKeySensing();
+        simulation.ephemera = []
+        simulation.pendingActions = []
+        powerUps.pendingSpawns = []
+        powerUps.powerUpStorage = []
+        tech.resetAllTech(); //sets tech to default values
+        b.resetAllGuns();
+        for (i = 0, len = b.guns.length; i < len; i++) { //find which gun 
+            if (b.guns[i].name === "laser") b.guns[i].chooseFireMethod()
+            if (b.guns[i].name === "nail gun") b.guns[i].chooseFireMethod()
+            if (b.guns[i].name === "super balls") b.guns[i].chooseFireMethod()
+            if (b.guns[i].name === "harpoon") b.guns[i].chooseFireMethod()
+            if (b.guns[i].name === "foam") b.guns[i].chooseFireMethod()
+        }
+        b.zeroBotCount()
+
+        m.isSwitchingWorlds = false
+        simulation.isChoosing = false;
+        b.setFireMethod()
+        b.setFireCD();
+        for (let i = 0; i < b.guns.length; i++) b.guns[i].isRecentlyShown = false //reset recently shown back to zero
+        for (let i = 0; i < m.fieldUpgrades.length; i++) m.fieldUpgrades[i].isRecentlyShown = false //reset recently shown back to zero
+        for (let i = 0; i < tech.tech.length; i++) tech.tech[i].isRecentlyShown = false //reset recently shown back to zero
+
+        powerUps.tech.choiceLog = [];
+        powerUps.gun.choiceLog = [];
+        powerUps.field.choiceLog = [];
+        powerUps.totalPowerUps = 0;
+        powerUps.research.count = 0;
+        powerUps.boost.endCycle = 0
+        powerUps.isFieldSpawned = false
+        m.setFillColors();
+        input.isPauseKeyReady = true
+        simulation.wipe = function () { //set wipe to normal
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        m.lastHit = 0
+        m.hole.isOn = false
+        simulation.paused = false;
+        engine.timing.timeScale = 1;
+        simulation.fpsCap = simulation.fpsCapDefault;
+        simulation.isAutoZoom = true;
+        simulation.makeGunHUD();
+        simulation.lastLogTime = 0;
+        mobs.mobDeaths = 0
+        level.isFlipped = false
+        level.isFlipping = false;
+        level.onLevel = 0;
+        level.levelsCleared = 0;
+        level.updateDifficulty()
+        // level.setConstraints()
+
+        simulation.clearNow = true;
+        document.getElementById("text-log").style.display = "none"
+        document.getElementById("fade-out").style.opacity = 0;
+        document.title = "n-gon";
+        simulation.inGameConsole(`Math.seed <span class='color-symbol'>=</span> ${Math.initialSeed}`);
+        simulation.inGameConsole(`<span class='color-var'>const</span> engine <span class='color-symbol'>=</span> Engine.create(); <em>//simulation begin</em>`);
+        simulation.inGameConsole(`engine.timing.timeScale <span class='color-symbol'>=</span> 1`);
+        m.alive = true;
+        m.definePlayerMass();
+        m.onGround = false
+        // m.groundCount = 0
+        m.lastOnGroundCycle = 0
+        // m.addHealth(0.25)
+        m.health = 0.25;
+
+        level.isLowHeal = false
+        m.drop();
+        m.holdingTarget = null
+
+        //set to default field
+        tech.healMaxEnergyBonus = 0
+        m.immuneCycle = 0;
+        m.coupling = 0
+        m.fieldUpgrades[1].energyHealthRatio = 1
+        m.fieldUpgrades[11].isPreview = false //portal views start off each run
+        m.setField(0) //this calls m.couplingChange(), which sets max health and max energy
+        m.energy = 1
+        //exit testing
+        if (simulation.testing) {
+            simulation.testing = false;
+            simulation.loop = simulation.normalLoop
+            if (simulation.isConstructionMode) document.getElementById("construct").style.display = 'none'
+        }
+        simulation.isCheating = false
+        simulation.firstRun = false;
+        build.hasExperimentalMode = false
+        build.isExperimentSelection = false;
+        build.isExperimentRun = false;
+        canvas.style.filter = "brightness(1)"
+
+        //setup checks
+        if (!localSettings.isHideHUD) {
+            simulation.ephemera.push({
+                name: "dmgDefBars", count: 0, do() {
+                    if (!(m.cycle % 15)) { //4 times a second
+                        const defense = m.defense() //update defense bar
+                        if (m.lastCalculatedDefense !== defense) {
+                            document.getElementById("defense-bar").style.width = Math.floor(m.healthBarWidth(m.maxHealth) * (1 - defense)) + "px";
+                            m.lastCalculatedDefense = defense
+                        }
+                        const damage = tech.damageAdjustments() //update damage bar
+                        if (m.lastCalculatedDamage !== damage) {
+                            m.lastCalculatedDamage = damage
+                        }
+                    }
+                },
+            })
+        }
+        simulation.ephemera.push({
+            name: "checks", count: 0, do() {
+                if (localSettings.showDmgNumbers && !(m.cycle % 30)) {
+                    for (let i = 0; i < mob.length; i++) {
+                        if (mob[i].dmgLog) {
+                            simulation.dmgNumbers({ x: mob[i].position.x, y: mob[i].position.y - mob[i].radius * 1.4 }, Math.ceil(mob[i].dmgLog).toFixed(0), "rgba(255, 30, 67,", 40)
+                            mob[i].dmgLog = 0
+                        }
+                    }
+                }
+
+                if (!(m.cycle % 60)) { //once a second
+                    //energy overfill 
+                    if (m.energy > m.maxEnergy) {
+                        m.energy = m.maxEnergy + (m.energy - m.maxEnergy) * tech.overfillDrain //every second energy above max energy loses 25%
+                        if (m.energy > 1000000) m.energy = 1000000
+                    }
+                    if (m.pos.y > simulation.fallHeight) { // if 4000px deep
+                        if (level.fallMode === "start") {
+                            //infinite falling.  teleport to sky after falling
+
+                            simulation.ephemera.push({
+                                count: 160, //cycles before it self removes
+                                do() {
+                                    this.count--
+                                    if (this.count < 0 || m.onGround) simulation.removeEphemera(this)
+                                    if (player.velocity.y > 70) Matter.Body.setVelocity(player, { x: player.velocity.x * 0.99, y: player.velocity.y * 0.99 });
+                                    if (player.velocity.y > 90) Matter.Body.setVelocity(player, { x: player.velocity.x * 0.99, y: player.velocity.y * 0.99 });
+                                },
+                            })
+
+                            const before = { x: player.position.x, y: player.position.y, }
+                            Matter.Body.setPosition(player, { x: level.enter.x, y: level.enter.y - 3000 });
+                            // Matter.Body.setPosition(player, level.fallPosition);
+
+                            const change = { x: before.x - player.position.x, y: before.y - player.position.y }
+                            // translate camera smoothly to preserve illusion to endless fall
+                            m.transX += change.x
+                            m.transY += change.y
+                            simulation.mouseInGame.x = (simulation.mouse.x - canvas.width2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.width2 - m.transX;
+                            simulation.mouseInGame.y = (simulation.mouse.y - canvas.height2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.height2 - m.transY;
+                            m.angle = Math.atan2(simulation.mouseInGame.y - m.pos.y, simulation.mouseInGame.x - m.pos.x);
+                            // move bots
+                            for (let i = 0; i < bullet.length; i++) {
+                                if (bullet[i].botType) Matter.Body.setPosition(bullet[i], Vector.sub(bullet[i].position, change));
+                            }
+                        } else if (level.fallMode === "position") { //fall and stay in the same horizontal position
+                            simulation.ephemera.push({
+                                count: 180, //cycles before it self removes
+                                do() {
+                                    this.count--
+                                    if (this.count < 0 || m.onGround) simulation.removeEphemera(this)
+                                    if (player.velocity.y > 70) Matter.Body.setVelocity(player, { x: player.velocity.x * 0.99, y: player.velocity.y * 0.99 });
+                                    if (player.velocity.y > 90) Matter.Body.setVelocity(player, { x: player.velocity.x * 0.99, y: player.velocity.y * 0.99 });
+                                },
+                            })
+                            const before = { x: player.position.x, y: player.position.y, }
+                            const posXClamped = Math.min(Math.max(level.fallModeBounds.left, player.position.x), level.fallModeBounds.right)
+                            Matter.Body.setPosition(player, { x: posXClamped, y: level.enter.y - 6000 });
+
+                            // translate camera smoothly to preserve illusion to endless fall
+                            const change = { x: before.x - posXClamped, y: before.y - player.position.y }
+                            m.transX += change.x
+                            m.transY += change.y
+                            simulation.mouseInGame.x = (simulation.mouse.x - canvas.width2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.width2 - m.transX;
+                            simulation.mouseInGame.y = (simulation.mouse.y - canvas.height2) / simulation.zoom * simulation.edgeZoomOutSmooth + canvas.height2 - m.transY;
+                            m.angle = Math.atan2(simulation.mouseInGame.y - m.pos.y, simulation.mouseInGame.x - m.pos.x);
+
+                            // move bots
+                            for (let i = 0; i < bullet.length; i++) {
+                                if (bullet[i].botType) Matter.Body.setPosition(bullet[i], Vector.sub(bullet[i].position, change));
+                            }
+                        } else { //go to start
+                            Matter.Body.setVelocity(player, { x: 0, y: 0 });
+                            Matter.Body.setPosition(player, { x: level.enter.x + 50, y: level.enter.y - 20 });
+                            // move bots
+                            for (let i = 0; i < bullet.length; i++) {
+                                if (bullet[i].botType) {
+                                    Matter.Body.setPosition(bullet[i], Vector.add(player.position, { x: 250 * (Math.random() - 0.5), y: 250 * (Math.random() - 0.5) }));
+                                    Matter.Body.setVelocity(bullet[i], { x: 0, y: 0 });
+                                }
+                            }
+                        }
+                    }
+                    if (isNaN(player.position.x)) m.death();
+                    if (m.lastKillCycle + 300 > m.cycle) { //effects active for 5 seconds after killing a mob
+                        if (tech.isEnergyRecovery) {
+                            m.addEnergy(m.maxEnergy * 0.05 * level.isReducedRegen)
+                            for (let i = 0; i < 2; i++)simulation.energyGenGraphic()
+                        }
+                        if (tech.isHealthRecovery) {
+                            if (tech.isEnergyHealth) {
+                                m.addEnergy(m.maxEnergy * 0.005 * level.isReducedRegen)
+                                simulation.energyGenGraphic()
+                            } else {
+                                const heal = 0.005 * m.maxHealth
+                                m.addHealth(heal)
+                                simulation.drawList.push({ //add dmg to draw queue
+                                    x: m.pos.x,
+                                    y: m.pos.y,
+                                    radius: Math.sqrt(heal) * 150,
+                                    color: "rgba(0,255,200,0.5)",
+                                    time: 4
+                                });
+                            }
+                        }
+                    }
+
+                    //check if player is stuck inside the map
+                    if (m.alive && !simulation.ephemera.some(e => e.name === "stuck") && m.isInsideMap()) {
+                        //check for the next 2 seconds to see if being stuck continues, physics can jiggle a stuck player out for a few cycles
+                        simulation.ephemera.push({
+                            name: "stuck",
+                            count: 0,
+                            free: 0, //cycles not inside the map
+                            do() {
+                                this.count++
+                                if (!m.isInsideMap()) this.free++
+                                if (this.free > 30) {
+                                    simulation.removeEphemera(this)
+                                } else if (this.count > 120) {
+                                    simulation.removeEphemera(this)
+                                    if (m.alive) m.unstuck()
+                                }
+                            },
+                        })
+                    }
+
+                    if (!(m.cycle % 420)) { //once every 7 seconds
+                        if (tech.isZeno) {
+                            m.takeDamage(0.05 * (tech.isEnergyHealth ? m.energy : m.health), false)
+                            // if (tech.isEnergyHealth) {
+                            //     m.energy *= 0.95
+                            // } else {
+                            //     m.health *= 0.95 //remove 5%
+                            //     m.displayHealth();
+                            // }
+                            simulation.drawList.push({ //add dmg to draw queue
+                                x: m.pos.x,
+                                y: m.pos.y,
+                                radius: 10,
+                                color: "rgb(255, 0, 195)",
+                                time: 4
+                            });
+                        }
+                        if (tech.cyclicImmunity && m.immuneCycle < m.cycle + tech.cyclicImmunity) m.immuneCycle = m.cycle + tech.cyclicImmunity; //player is immune to damage for 60 cycles
+
+
+                        let i = body.length;
+                        while (i--) {
+                            if (body[i].position.y > simulation.fallHeight) {
+                                if (body[i].isInvulnerable || body[i].isImmutable) {
+                                    Matter.Body.setVelocity(body[i], { x: 0, y: 0 });
+                                    if (level.fallMode === "position") {
+                                        const posXClamped = Math.min(Math.max(level.fallModeBounds.left, body[i].position.x), level.fallModeBounds.right)
+                                        Matter.Body.setPosition(body[i], { x: posXClamped, y: level.enter.y - 4000 });
+                                    } else {
+                                        Matter.Body.setPosition(body[i], { x: level.enter.x + 50, y: level.enter.y - 20 });
+                                    }
+                                } else {
+                                    Matter.Composite.remove(engine.world, body[i]);
+                                    body.splice(i, 1);
+                                }
+                            }
+                        }
+                        i = powerUp.length
+                        while (i--) {
+                            if (powerUp[i].position.y > simulation.fallHeight) {
+                                Matter.Body.setVelocity(powerUp[i], { x: 0, y: 0 });
+                                if (level.fallMode === "position") {
+                                    const posXClamped = Math.min(Math.max(level.fallModeBounds.left, powerUp[i].position.x), level.fallModeBounds.right)
+                                    Matter.Body.setPosition(powerUp[i], { x: posXClamped, y: level.enter.y - 3000 });
+                                } else {
+                                    Matter.Body.setPosition(powerUp[i], {
+                                        x: level.exit.x + 30 * (Math.random() - 0.5),
+                                        y: level.exit.y + 30 * (Math.random() - 0.5)
+                                    });
+                                }
+                            }
+                        }
+                        i = mob.length;
+                        while (i--) {
+                            if (mob[i].position.y > simulation.fallHeight) {
+                                if (mob[i].isBoss && level.fallMode === "position") {
+                                    Matter.Body.setVelocity(mob[i], { x: 0, y: 0 });
+                                    const posXClamped = Math.min(Math.max(level.fallModeBounds.left, mob[i].position.x), level.fallModeBounds.right)
+                                    Matter.Body.setPosition(mob[i], { x: posXClamped, y: level.enter.y - 3000 });
+                                } else {
+                                    mob[i].death();
+                                }
+                            }
+                        }
+
+                    }
+                }
+            },
+        })
+
+        saveGame.captureBaseline() //autosaves only store what changed from this fresh run
+        //setup FPS cap
+        simulation.fpsInterval = 1000 / simulation.fpsCap;
+        simulation.then = Date.now();
+        requestAnimationFrame(cycle); //starts game loop
+        mouseMove.lock()
+    },
+    clearTimeouts() {
+        let id = window.setTimeout(function () { }, 0);
+        while (id--) {
+            window.clearTimeout(id); // will do nothing if no timeout with id is present
+        }
+    },
+    clearNow: false,
+    clearMap() {
+        let i, len
+        level.disableExit = false; //clear level-specific locks, including when starting a new run
+        // level.mirrorDoors.reset();
+        level.exit.reflection = null;
+        level.exit.ripple = null;
+        level.exit.isInverted = false;
+        level.exit.bottomOffset = 20;
+        level.isVerticalFLipLevel = false
+        level.isProcedural = false;
+        level.fallMode = "";
+        simulation.unFlipCameraVertical()
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        if (m.alive) {
+            if (!tech.isTransverse) b.guns[3].waves = []; //empty array of longitudinal wave bullets
+            if (b.guns[10].have) { //do you have mines as a gun
+                let count = 0;
+                for (i = 0, len = bullet.length; i < len; i++) { //count mines left on map
+                    if (
+                        (bullet[i].bulletType === "mine" && (!tech.isMineSentry || bullet[i].shots === undefined)) ||
+                        (bullet[i].bulletType === "laser mine" && !bullet[i].isDetonated)) { //laser mines that already fired aren't refunded
+                        count++
+                    }
+                }
+                if (tech.crouchAmmoCount) count = Math.ceil(count / 2)
+                b.guns[10].ammo += count
+                if (tech.ammoCap) b.guns[10].ammo = Math.min(tech.ammoCap, b.guns[10].ammo)
+                simulation.updateGunHUD();
+            }
+
+            for (let i = 0; i < bullet.length; i++) { //harpoons still out give back their ammo
+                if (bullet[i].refundsAmmo) b.guns[9].ammo++
+            }
+            if (tech.isMutualism) {
+                for (let i = 0; i < bullet.length; i++) {
+                    if (bullet[i].isMutualismActive) {
+                        const refund = bullet[i].isSpore ? 0.01 : 0.02
+                        bullet[i].isMutualismActive = false
+                        if (tech.isEnergyHealth) {
+                            m.addEnergy(refund)
+                            simulation.energyGenGraphic()
+                        } else {
+                            m.health = Math.min(m.maxHealth, m.health + refund)
+                            m.displayHealth();
+                        }
+                    }
+                }
+            }
+        }
+        simulation.lastLogTime = 0; //clear previous messages
+        spawn.allowShields = true;
+        powerUps.totalPowerUps = powerUp.length
+        let holdTarget = saveGame.isResuming ? saveGame.pendingHeldBlock : m.holdingTarget //checkpoints carry plain geometry, normal transitions carry the body
+        saveGame.pendingHeldBlock = null
+        tech.deathSpawnsFromBoss = 0;
+        simulation.fallHeight = 3000;
+        document.body.style.backgroundColor = "#eee" //"#d8dadf";
+        // color.map = "#444";
+        // color.bullet = "#FFFFFF";
+        color = { //light
+            // background: "#ddd", // used instead:  document.body.style.backgroundColor
+            block: "rgba(140,140,140,0.85)",
+            blockS: "#222",
+            map: "#444",
+            bullet: "#000"
+        }
+        simulation.draw.drawMapPath = simulation.draw.drawMapPathDefault
+        m.fireCDcycle = 0
+        m.drop();
+        m.hole.isOn = false;
+        simulation.drawList = [];
+        mobs.maxMobBody = 40
+
+        level.collectTransfers()
+        if (tech.isQuantumEraser && m.alive && !saveGame.isResuming) {
+            let count = 0
+            for (let i = 0, len = mob.length; i < len; i++) {
+                if (mob[i].isDropPowerUp && mob[i].alive) count++
+            }
+            count *= 0.44 //to fake the chance, this makes it not random, and more predictable
+            //Queue before the checkpoint; spawnDelay still waits until the map has been cleared.
+            const types = ["heal", "ammo", "heal", "ammo", "research", "coupling", "boost", "tech", "gun", "field"]
+            for (let i = 0; i < count; i++) powerUps.spawnDelay(types[Math.floor(Math.random() * types.length)], 1)
+        }
+
+        function removeAll(array) {
+            // for (let i = 0; i < array.length; ++i) Matter.Composite.remove(engine.world, array[i]);
+            for (let i = 0; i < array.length; ++i) Matter.Composite.remove(engine.world, array[i]);
+        }
+        removeAll(map);
+        map = [];
+        removeAll(body);
+        body = [];
+        lastTouchedBlock = null;
+        removeAll(mob);
+        mob = [];
+        removeAll(powerUp);
+        powerUp = [];
+        removeAll(cons);
+        cons = [];
+        removeAll(consBB);
+        consBB = [];
+        removeAll(bullet);
+        bullet = [];
+        removeAll(composite);
+        composite = [];
+        // if player was holding something this makes a new copy to hold
+        if (holdTarget && m.alive) {
+            len = body.length;
+            body[len] = Matter.Bodies.fromVertices(0, 0, holdTarget.vertices, {
+                friction: holdTarget.friction,
+                frictionAir: holdTarget.frictionAir,
+                frictionStatic: holdTarget.frictionStatic,
+                isKey: holdTarget.isKey,
+                isImmutable: holdTarget.isImmutable,
+                draw: holdTarget.draw
+            });
+            Matter.Body.setPosition(body[len], m.pos);
+            m.isHolding = true
+            m.holdingTarget = body[len];
+            m.holdingTarget.collisionFilter.category = 0;
+            m.holdingTarget.collisionFilter.mask = 0;
+            m.definePlayerMass(m.defaultMass + m.holdingTarget.mass * m.holdingMassScale)
+            Composite.add(engine.world, m.holdingTarget); //add to world
+            m.holdingTarget.classType = "body"
+        }
+        //set fps back to default
+        simulation.fpsCap = simulation.fpsCapDefault
+        simulation.fpsInterval = 1000 / simulation.fpsCap;
+    },
+    // getCoords: {
+    //   //used when building maps, outputs a draw rect command to console, only works in testing mode
+    //   pos1: {
+    //     x: 0,
+    //     y: 0
+    //   },
+    //   pos2: {
+    //     x: 0,
+    //     y: 0
+    //   },
+    //   out() {
+    //     if (keys[49]) {
+    //       simulation.getCoords.pos1.x = Math.round(simulation.mouseInGame.x / 25) * 25;
+    //       simulation.getCoords.pos1.y = Math.round(simulation.mouseInGame.y / 25) * 25;
+    //     }
+    //     if (keys[50]) {
+    //       //press 1 in the top left; press 2 in the bottom right;copy command from console
+    //       simulation.getCoords.pos2.x = Math.round(simulation.mouseInGame.x / 25) * 25;
+    //       simulation.getCoords.pos2.y = Math.round(simulation.mouseInGame.y / 25) * 25;
+    //       window.getSelection().removeAllRanges();
+    //       var range = document.createRange();
+    //       range.selectNode(document.getElementById("test"));
+    //       window.getSelection().addRange(range);
+    //       document.execCommand("copy");
+    //       window.getSelection().removeAllRanges();
+    //     }
+    //   }
+    // },
+    testingOutput() {
+        ctx.fillStyle = "#000";
+        ctx.fillText(`(${simulation.mouseInGame.x.toFixed(1)}, ${simulation.mouseInGame.y.toFixed(1)})`, simulation.mouse.x, simulation.mouse.y - 20);
+    },
+    sight: { //credit to Cornbread2100 for adding this algorithm to n-gon
+        // square: 0,
+        intersectMap: [], //this is precalculated in simulation.draw.lineOfSightPrecalculation()
+        getIntersection(v1, v1End, domain) {
+            const intersections = simulation.sight.getIntersections(v1, v1End, domain);
+            var best = { x: v1End.x, y: v1End.y, dist: (v1End.x - v1.x) ** 2 + (v1End.y - v1.y) ** 2 }
+            for (const intersection of intersections) {
+                const dist = (intersection.x - v1.x) ** 2 + (intersection.y - v1.y) ** 2;
+                if (dist < best.dist) best = { x: intersection.x, y: intersection.y, dist: dist }
+            }
+            best.dist = Math.sqrt(best.dist)
+            return best;
+        },
+        // getIntersections(v1, v1End, domain) {
+        //     const intersections = [];
+        //     for (const obj of domain) {
+        //         for (var i = 0; i < obj.vertices.length - 1; i++) {
+        //             results = simulation.checkLineIntersection(v1, v1End, obj.vertices[i], obj.vertices[i + 1]);
+        //             if (results.onLine1 && results.onLine2) intersections.push({ x: results.x, y: results.y });
+        //         }
+        //         results = simulation.checkLineIntersection(v1, v1End, obj.vertices[obj.vertices.length - 1], obj.vertices[0]);
+        //         if (results.onLine1 && results.onLine2) intersections.push({ x: results.x, y: results.y });
+        //     }
+        //     return intersections;
+        // },
+
+        // (Only adds an AABB guard + declares `results` with let.)
+        getIntersections(v1, v1End, domain) {
+            const rayMinX = v1.x < v1End.x ? v1.x : v1End.x;
+            const rayMaxX = v1.x > v1End.x ? v1.x : v1End.x;
+            const rayMinY = v1.y < v1End.y ? v1.y : v1End.y;
+            const rayMaxY = v1.y > v1End.y ? v1.y : v1End.y;
+
+            function edgeBboxOverlapsRay(q1, q2) {
+                const edgeMinX = q1.x < q2.x ? q1.x : q2.x;
+                const edgeMaxX = q1.x > q2.x ? q1.x : q2.x;
+                const edgeMinY = q1.y < q2.y ? q1.y : q2.y;
+                const edgeMaxY = q1.y > q2.y ? q1.y : q2.y;
+                return !(rayMaxX < edgeMinX || edgeMaxX < rayMinX || rayMaxY < edgeMinY || edgeMaxY < rayMinY);
+            }
+
+            const intersections = [];
+
+            for (const obj of domain) {
+                const bounds = obj.bounds; //skip the whole body if it's away from the ray
+                if (rayMaxX < bounds.min.x || bounds.max.x < rayMinX || rayMaxY < bounds.min.y || bounds.max.y < rayMinY) continue;
+                // iterate edges [i] -> [i+1]
+                for (let i = 0; i < obj.vertices.length - 1; i++) {
+                    const a = obj.vertices[i];
+                    const b = obj.vertices[i + 1];
+
+                    // Cheap reject: skip if segment bbox doesn't overlap ray bbox
+                    if (!edgeBboxOverlapsRay(a, b)) continue;
+
+                    const results = simulation.checkLineIntersection(v1, v1End, a, b);
+                    if (results.onLine1 && results.onLine2) intersections.push({ x: results.x, y: results.y });
+                }
+
+                // close the polygon: last -> first
+                const a = obj.vertices[obj.vertices.length - 1];
+                const b = obj.vertices[0];
+
+                if (edgeBboxOverlapsRay(a, b)) {
+                    const results = simulation.checkLineIntersection(v1, v1End, a, b);
+                    if (results.onLine1 && results.onLine2) intersections.push({ x: results.x, y: results.y });
+                }
+            }
+
+            return intersections;
+        },
+
+        appendMapIntersections(v1, v1End, excludedBodyIndex, target) {
+            const rayMinX = v1.x < v1End.x ? v1.x : v1End.x;
+            const rayMaxX = v1.x > v1End.x ? v1.x : v1End.x;
+            const rayMinY = v1.y < v1End.y ? v1.y : v1End.y;
+            const rayMaxY = v1.y > v1End.y ? v1.y : v1End.y;
+            const rayDx = v1End.x - v1.x;
+            const rayDy = v1End.y - v1.y;
+
+            for (let bodyIndex = 0; bodyIndex < map.length; bodyIndex++) {
+                if (bodyIndex === excludedBodyIndex) continue;
+                const obj = map[bodyIndex];
+                if (obj.isRay) continue //tech: ray, you can see through the line left behind
+                const bounds = obj.bounds;
+                if (rayMaxX < bounds.min.x || bounds.max.x < rayMinX ||
+                    rayMaxY < bounds.min.y || bounds.max.y < rayMinY) continue;
+
+                const vertices = obj.vertices;
+                for (let edgeIndex = 0; edgeIndex < vertices.length; edgeIndex++) {
+                    const edgeStart = vertices[edgeIndex];
+                    const edgeEnd = vertices[(edgeIndex + 1) % vertices.length];
+                    const edgeMinX = edgeStart.x < edgeEnd.x ? edgeStart.x : edgeEnd.x;
+                    const edgeMaxX = edgeStart.x > edgeEnd.x ? edgeStart.x : edgeEnd.x;
+                    const edgeMinY = edgeStart.y < edgeEnd.y ? edgeStart.y : edgeEnd.y;
+                    const edgeMaxY = edgeStart.y > edgeEnd.y ? edgeStart.y : edgeEnd.y;
+                    if (rayMaxX < edgeMinX || edgeMaxX < rayMinX ||
+                        rayMaxY < edgeMinY || edgeMaxY < rayMinY) continue;
+
+                    const edgeDx = edgeEnd.x - edgeStart.x;
+                    const edgeDy = edgeEnd.y - edgeStart.y;
+                    const denominator = edgeDy * rayDx - edgeDx * rayDy;
+                    if (denominator === 0) continue;
+                    const offsetY = v1.y - edgeStart.y;
+                    const offsetX = v1.x - edgeStart.x;
+                    const rayFraction = (edgeDx * offsetY - edgeDy * offsetX) / denominator;
+                    const edgeFraction = (rayDx * offsetY - rayDy * offsetX) / denominator;
+                    if (rayFraction > 0 && rayFraction < 1 && edgeFraction > 0 && edgeFraction < 1) {
+                        target.push({
+                            x: v1.x + rayFraction * rayDx,
+                            y: v1.y + rayFraction * rayDy
+                        });
+                    }
+                }
+            }
+        },
+
+        circleLineCollisionsLegacy(a, b, c, radius) {
+            const angleOffset = Math.atan2(b.y - a.y, b.x - a.x);
+            const sideB = Math.sqrt((a.x - c.x) ** 2 + (a.y - c.y) ** 2);
+            const sideC = Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2);
+            const sideA = Math.sqrt((c.x - b.x) ** 2 + (c.y - b.y) ** 2);
+            const angleA = Math.acos((sideB ** 2 + sideC ** 2 - sideA ** 2) / (2 * sideB * sideC)) *
+                (a.x - c.x) / -Math.abs(a.x - c.x);
+            const sideAD = Math.cos(angleA) * sideB;
+            const d = {
+                x: Math.cos(angleOffset) * sideAD + a.x,
+                y: Math.sin(angleOffset) * sideAD + a.y
+            };
+            const distance = Math.sqrt((d.x - c.x) ** 2 + (d.y - c.y) ** 2);
+            if (distance == radius) return [d];
+            if (distance >= radius) return [];
+
+            const collisionAngle = Math.atan2(d.y - c.y, d.x - c.x);
+            const innerAngle = Math.acos(distance / radius);
+            const intersection1 = {
+                x: Math.cos(collisionAngle + innerAngle) * radius + c.x,
+                y: Math.sin(collisionAngle + innerAngle) * radius + c.y
+            };
+            const intersection2 = {
+                x: Math.cos(collisionAngle - innerAngle) * radius + c.x,
+                y: Math.sin(collisionAngle - innerAngle) * radius + c.y
+            };
+            const distance1A = Math.sqrt((intersection1.x - a.x) ** 2 + (intersection1.y - a.y) ** 2);
+            const distance1B = Math.sqrt((intersection1.x - b.x) ** 2 + (intersection1.y - b.y) ** 2);
+            const distance2A = Math.sqrt((intersection2.x - a.x) ** 2 + (intersection2.y - a.y) ** 2);
+            const distance2B = Math.sqrt((intersection2.x - b.x) ** 2 + (intersection2.y - b.y) ** 2);
+            const result = [];
+            if (Math.abs(sideC - (distance1A + distance1B)) < 0.01) {
+                result.push(intersection1);
+            } else if (distance1A < distance1B) {
+                if (sideB <= radius) result.push(a);
+            } else if (sideA <= radius) {
+                result.push(b);
+            }
+            if (Math.abs(sideC - (distance2A + distance2B)) < 0.01) {
+                result.push(intersection2);
+            } else if (distance2A <= distance2B) {
+                if (sideB <= radius) result.push(a);
+            } else if (sideA <= radius) {
+                result.push(b);
+            }
+            return result;
+        },
+
+        circleLineCollisions(a, b, c, radius) {
+            const edgeDx = b.x - a.x;
+            const edgeDy = b.y - a.y;
+            const edgeLengthSquared = edgeDx * edgeDx + edgeDy * edgeDy;
+            const centerDx = c.x - a.x;
+            const centerDy = c.y - a.y;
+            const side = edgeDx * centerDy - edgeDy * centerDx;
+            if (edgeLengthSquared === 0 || a.x === c.x || side === 0) {
+                return simulation.sight.circleLineCollisionsLegacy(a, b, c, radius);
+            }
+
+            const closestFraction = (centerDx * edgeDx + centerDy * edgeDy) / edgeLengthSquared;
+            const closestX = a.x + closestFraction * edgeDx;
+            const closestY = a.y + closestFraction * edgeDy;
+            const closestDx = closestX - c.x;
+            const closestDy = closestY - c.y;
+            const closestDistanceSquared = closestDx * closestDx + closestDy * closestDy;
+            const radiusSquared = radius * radius;
+            if (closestDistanceSquared === radiusSquared) return [{ x: closestX, y: closestY }];
+            if (closestDistanceSquared >= radiusSquared) return [];
+
+            const edgeLength = Math.sqrt(edgeLengthSquared);
+            const rootOffset = Math.sqrt(radiusSquared - closestDistanceSquared) / edgeLength;
+            const lowerFraction = closestFraction - rootOffset;
+            const upperFraction = closestFraction + rootOffset;
+            const firstFraction = side > 0 ? upperFraction : lowerFraction;
+            const secondFraction = side > 0 ? lowerFraction : upperFraction;
+            const fractionTolerance = 0.005 / edgeLength;
+            const aInside = centerDx * centerDx + centerDy * centerDy <= radiusSquared;
+            const bCenterDx = b.x - c.x;
+            const bCenterDy = b.y - c.y;
+            const bInside = bCenterDx * bCenterDx + bCenterDy * bCenterDy <= radiusSquared;
+            const result = [];
+
+            function appendCollision(fraction) {
+                if (fraction > -fractionTolerance && fraction < 1 + fractionTolerance) {
+                    result.push({
+                        x: a.x + fraction * edgeDx,
+                        y: a.y + fraction * edgeDy
+                    });
+                } else if (fraction < 0.5) {
+                    if (aInside) result.push(a);
+                } else if (bInside) {
+                    result.push(b);
+                }
+            }
+
+            appendCollision(firstFraction);
+            appendCollision(secondFraction);
+            return result;
+        },
+
+        circleLoS(pos, radius) {
+            const solid = map.some(who => who.isRay) ? map.filter(who => !who.isRay) : map //tech: ray, you can see through the line left behind
+            let test
+            function allCircleLineCollisions(c, radius, domain) {
+                var lines = [];
+                for (const obj of domain) {
+                    const bounds = obj.bounds; //skip bodies away from the circle, the extra 1 matches the distance check below
+                    if (c.x + radius + 1 < bounds.min.x || bounds.max.x < c.x - radius - 1 || c.y + radius + 1 < bounds.min.y || bounds.max.y < c.y - radius - 1) continue;
+                    for (var i = 0; i < obj.vertices.length - 1; i++) lines.push(simulation.sight.circleLineCollisions(obj.vertices[i], obj.vertices[i + 1], c, radius));
+                    lines.push(simulation.sight.circleLineCollisions(obj.vertices[obj.vertices.length - 1], obj.vertices[0], c, radius));
+                }
+                const collisionLines = [];
+                for (const line of lines) {
+                    if (line.length == 2) {
+                        // const distance1 = Math.sqrt((line[0].x - c.x) ** 2 + (line[0].y - c.y) ** 2)
+                        // const angle1 = Math.atan2(line[0].y - c.y, line[0].x - c.x);
+                        // const queryPoint1 = {
+                        //     x: Math.cos(angle1) * (distance1 - 1) + c.x,
+                        //     y: Math.sin(angle1) * (distance1 - 1) + c.y
+                        // }
+                        // const distance2 = Math.sqrt((line[1].x - c.x) ** 2 + (line[1].y - c.y) ** 2)
+                        // const angle2 = Math.atan2(line[1].y - c.y, line[1].x - c.x);
+                        // const queryPoint2 = {
+                        //     x: Math.cos(angle2) * (distance2 - 1) + c.x,
+                        //     y: Math.sin(angle2) * (distance2 - 1) + c.y
+                        // }
+                        collisionLines.push(line)
+                    }
+                }
+
+                return collisionLines;
+            }
+
+            var vertices = [];
+            const radiusSquared = radius * radius
+            for (const obj of simulation.sight.intersectMap) {
+                for (var i = 0; i < obj.vertices.length; i++) {
+                    const vertex = obj.vertices[i];
+                    //skip corners outside the circle, where walls cross the circle is found below with circleCollisions
+                    if ((vertex.x - pos.x) ** 2 + (vertex.y - pos.y) ** 2 > radiusSquared) continue
+                    const angleToVertex = Math.atan2(vertex.y - pos.y, vertex.x - pos.x);
+                    // const distanceToVertex = Math.sqrt((vertex.x - pos.x) ** 2 + (vertex.y - pos.y) ** 2);
+                    // const queryPoint = { x: Math.cos(angleToVertex) * (distanceToVertex - 1) + pos.x, y: Math.sin(angleToVertex) * (distanceToVertex - 1) + pos.y }
+                    const queryPoint = { x: Math.cos(angleToVertex + Math.PI) + vertex.x, y: Math.sin(angleToVertex + Math.PI) + vertex.y }
+
+                    if (!Matter.Query.segmentAny(solid, pos, queryPoint)) {
+                        var distance = Math.sqrt((vertex.x - pos.x) ** 2 + (vertex.y - pos.y) ** 2);
+                        var endPoint = { x: vertex.x, y: vertex.y }
+
+                        var best = simulation.sight.getIntersection(pos, endPoint, solid);
+                        if (best.dist >= distance) best = { x: endPoint.x, y: endPoint.y, dist: distance }
+                        vertices.push(best)
+
+                        var angle = Math.atan2(vertex.y - pos.y, vertex.x - pos.x);
+                        endPoint = { x: Math.cos(angle + 0.001) * radius + pos.x, y: Math.sin(angle + 0.001) * radius + pos.y }
+                        best = simulation.sight.getIntersection(pos, endPoint, solid);
+
+                        if (best.dist >= radius) best = { x: endPoint.x, y: endPoint.y, dist: radius }
+                        vertices.push(best)
+
+                        angle = Math.atan2(vertex.y - pos.y, vertex.x - pos.x);
+                        endPoint = { x: Math.cos(angle - 0.001) * radius + pos.x, y: Math.sin(angle - 0.001) * radius + pos.y }
+
+                        best = simulation.sight.getIntersection(pos, endPoint, solid);
+                        if (best.dist >= radius) best = { x: endPoint.x, y: endPoint.y, dist: radius }
+                        vertices.push(best)
+                    }
+                }
+            }
+
+            const outerCollisions = allCircleLineCollisions(pos, radius, solid);
+            const circleCollisions = [];
+            for (const line of outerCollisions) {
+                for (const vertex of line) {
+                    const distance = Math.sqrt((vertex.x - pos.x) ** 2 + (vertex.y - pos.y) ** 2)
+                    const angle = Math.atan2(vertex.y - pos.y, vertex.x - pos.x);
+                    const queryPoint = { x: Math.cos(angle + Math.PI) + vertex.x, y: Math.sin(angle + Math.PI) + vertex.y }
+                    if (Math.abs(distance - radius) < 1 && !Matter.Query.segmentAny(solid, pos, queryPoint)) circleCollisions.push(vertex)
+                }
+            }
+            for (var i = 0; i < circleCollisions.length; i++) {
+                const vertex = circleCollisions[i];
+                var nextIndex = i + 1;
+                if (nextIndex == circleCollisions.length) nextIndex = 0;
+                const nextVertex = circleCollisions[nextIndex];
+                const angle1 = Math.atan2(vertex.y - pos.y, vertex.x - pos.x);
+                const angle2 = Math.atan2(nextVertex.y - pos.y, nextVertex.x - pos.x);
+                var newAngle;
+                if (Math.abs(angle1) > Math.PI / 2 && Math.abs(angle2) > Math.PI / 2 && angle1 / Math.abs(angle1) != angle2 / Math.abs(angle2)) {
+                    // if the arc between the to points crosses over the left side (+/- pi radians)
+                    const newAngle1 = (Math.PI - Math.abs(angle1)) * (angle1 / Math.abs(angle1));
+                    const newAngle2 = (Math.PI - Math.abs(angle2)) * (angle2 / Math.abs(angle2));
+                    newAngle = (newAngle1 + newAngle2) / 2;
+                    var multiplier;
+                    if (newAngle == 0) {
+                        multiplier = 1;
+                    } else {
+                        multiplier = newAngle / Math.abs(newAngle);
+                    }
+                    newAngle = Math.PI * multiplier - newAngle * multiplier;
+                    test = true;
+                } else {
+                    newAngle = (angle1 + angle2) / 2;
+                }
+
+                // shoot ray between them
+                var endPoint = { x: Math.cos(newAngle) * radius + pos.x, y: Math.sin(newAngle) * radius + pos.y }
+                var best = simulation.sight.getIntersection(pos, endPoint, solid);
+                vertices.push(vertex);
+                if (best.dist <= radius) vertices.push({ x: best.x, y: best.y })
+            }
+            if (vertices.length === 0 && !Matter.Query.point(solid, pos).length) { //no walls in the circle, so see the whole circle
+                for (let angle = -Math.PI; angle < Math.PI; angle += Math.PI / 2) vertices.push({ x: Math.cos(angle) * radius + pos.x, y: Math.sin(angle) * radius + pos.y })
+            }
+            vertices.sort((a, b) => Math.atan2(a.y - pos.y, a.x - pos.x) - Math.atan2(b.y - pos.y, b.x - pos.x));
+            return vertices;
+        },
+    },
+    draw: {
+
+        isMapPathRebuildPending: false,
+        requestMapPathRebuild() {
+            simulation.draw.isMapPathRebuildPending = true;
+        },
+        flushMapPathRebuild() {
+            if (!simulation.draw.isMapPathRebuildPending) return false;
+            simulation.draw.isMapPathRebuildPending = false;
+            simulation.draw.setPaths();
+            simulation.draw.lineOfSightPrecalculation();
+            return true;
+        },
+
+        mapPath: null, //holds the path for the map to speed up drawing
+        setPaths() {
+            //runs at each new level to store the path for the map since the map doesn't change
+            simulation.draw.mapPath = new Path2D();
+            for (let i = 0, len = map.length; i < len; ++i) {
+                if (map[i].isRay) continue //tech: ray, draws its own walls
+                let vertices = map[i].vertices;
+                simulation.draw.mapPath.moveTo(vertices[0].x, vertices[0].y);
+                for (let j = 1; j < vertices.length; j += 1) {
+                    simulation.draw.mapPath.lineTo(vertices[j].x, vertices[j].y);
+                }
+                simulation.draw.mapPath.lineTo(vertices[0].x, vertices[0].y);
+            }
+            if (simulation.draw.drawMapPath === simulation.draw.drawMapSightSetting) simulation.draw.lineOfSightPrecalculation() //keep the line of sight setting up to date when the map changes
+        },
+        isLineOfSight() { //subway, the line of sight setting, and community maps with line of sight all replace drawMapPath
+            return simulation.draw.drawMapPath !== simulation.draw.drawMapPathDefault
+        },
+        mapColor(mapColor = color.map) { //for things drawn to look like the map, like covers over hidden areas, line of sight doesn't fill the map so they match the background instead
+            return simulation.draw.isLineOfSight() ? document.body.style.backgroundColor : mapColor
+        },
+        updateLineOfSightSetting() { //line of sight setting draws every level like subway, levels with their own map drawing are left alone
+            if (localSettings.isLineOfSight && simulation.draw.drawMapPath === simulation.draw.drawMapPathDefault) {
+                simulation.draw.drawMapPath = simulation.draw.drawMapSightSetting
+                simulation.draw.lineOfSightPrecalculation() //required precalculation for line of sight
+            } else if (!localSettings.isLineOfSight && simulation.draw.drawMapPath === simulation.draw.drawMapSightSetting) {
+                simulation.draw.drawMapPath = simulation.draw.drawMapPathDefault
+            }
+        },
+        lineOfSightPrecalculation() {
+            simulation.sight.intersectMap = [];
+            for (let i = 0; i < map.length; i++) {
+                const obj = map[i];
+                if (obj.isRay) continue //tech: ray, you can see through the line left behind
+                const newVertices = [];
+                for (let j = 0; j < obj.vertices.length; j++) {
+                    const vertex = obj.vertices[j];
+                    newVertices.push(vertex);
+                    simulation.sight.appendMapIntersections(
+                        vertex,
+                        obj.vertices[(j + 1) % obj.vertices.length],
+                        i,
+                        newVertices
+                    );
+                }
+                //draw the vertices as black circles for debugging
+                // for (const vertex of newVertices) {
+                //     ctx.beginPath();
+                //     ctx.moveTo(vertex.x, vertex.y);
+                //     ctx.arc(vertex.x, vertex.y, 10, 0, 2 * Math.PI);
+                //     ctx.fillStyle = '#000';
+                //     ctx.fill()
+                // }
+                simulation.sight.intersectMap.push({ vertices: newVertices });
+            }
+        },
+        drawMapPath() { },
+        drawMapPathDefault() {
+            ctx.fillStyle = color.map;
+            ctx.fill(simulation.draw.mapPath);
+        },
+        drawMapSightSetting() {
+            simulation.draw.drawMapSight(true)
+        },
+        drawMapSight(isShadeSight = false) {
+            if (!simulation.isTimeSkipping) {
+                const pos = m.pos
+                const radius = 4000
+                const vertices = simulation.sight.circleLoS(pos, radius);
+                if (vertices.length) {
+                    ctx.beginPath();
+                    ctx.moveTo(vertices[0].x, vertices[0].y);
+                    for (var i = 1; i < vertices.length; i++) {
+                        var currentDistance = Math.sqrt((vertices[i - 1].x - pos.x) ** 2 + (vertices[i - 1].y - pos.y) ** 2);
+                        var newDistance = Math.sqrt((vertices[i].x - pos.x) ** 2 + (vertices[i].y - pos.y) ** 2);
+                        if (Math.abs(currentDistance - radius) < 1 && Math.abs(newDistance - radius) < 1) {
+                            const currentAngle = Math.atan2(vertices[i - 1].y - pos.y, vertices[i - 1].x - pos.x);
+                            const newAngle = Math.atan2(vertices[i].y - pos.y, vertices[i].x - pos.x);
+                            ctx.arc(pos.x, pos.y, radius, currentAngle, newAngle);
+                        } else {
+                            ctx.lineTo(vertices[i].x, vertices[i].y)
+                        }
+                    }
+                    newDistance = Math.sqrt((vertices[0].x - pos.x) ** 2 + (vertices[0].y - pos.y) ** 2);
+                    currentDistance = Math.sqrt((vertices[vertices.length - 1].x - pos.x) ** 2 + (vertices[vertices.length - 1].y - pos.y) ** 2);
+                    if (Math.abs(currentDistance - radius) < 1 && Math.abs(newDistance - radius) < 1) {
+                        const currentAngle = Math.atan2(vertices[vertices.length - 1].y - pos.y, vertices[vertices.length - 1].x - pos.x);
+                        const newAngle = Math.atan2(vertices[0].y - pos.y, vertices[0].x - pos.x);
+                        ctx.arc(pos.x, pos.y, radius, currentAngle, newAngle);
+                    } else {
+                        ctx.lineTo(vertices[0].x, vertices[0].y)
+                    }
+
+                    // outline map edges, best with lighter colored document.body.style.backgroundColor
+                    ctx.strokeStyle = "#000";
+                    ctx.lineWidth = 5;
+                    ctx.stroke(simulation.draw.mapPath);
+
+                    ctx.globalCompositeOperation = "destination-in";
+                    ctx.fillStyle = "#000";
+                    ctx.fill();
+                    if (isShadeSight) { //darken what you can see behind everything drawn so far, subway does this with a rect in level.custom
+                        ctx.globalCompositeOperation = "destination-over";
+                        ctx.fillStyle = "rgba(0,0,0,0.1)";
+                        ctx.fill();
+                    }
+                    ctx.globalCompositeOperation = "source-over";
+
+                    // make map visible
+                    // ctx.fill(simulation.draw.mapPath);
+                    // ctx.fillStyle = "#000";
+
+                    ctx.clip(); //this doesn't seem to be required, but it helps with performance, probably stops the canvas context from drawing the whole map
+                }
+            }
+        },
+        bodyDefault() {
+            ctx.beginPath();
+            for (let i = 0, len = body.length; i < len; ++i) {
+                let vertices = body[i].vertices;
+                ctx.moveTo(vertices[0].x, vertices[0].y);
+                for (let j = 1; j < vertices.length; j++) {
+                    ctx.lineTo(vertices[j].x, vertices[j].y);
+                }
+                ctx.lineTo(vertices[0].x, vertices[0].y);
+            }
+            ctx.fillStyle = color.block;
+            ctx.fill();
+            if (!localSettings.isHideHUD) { //performance mode: no stroke on blocks, checked every frame so the pause menu toggle applies right away
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = color.blockS;
+                ctx.stroke();
+            }
+        },
+        body() { },
+        cons() {
+            ctx.beginPath();
+            for (let i = 0, len = cons.length; i < len; ++i) {
+                ctx.moveTo(cons[i].pointA.x, cons[i].pointA.y);
+                // ctx.lineTo(cons[i].bodyB.position.x, cons[i].bodyB.position.y);
+                ctx.lineTo(cons[i].bodyB.position.x + cons[i].pointB.x, cons[i].bodyB.position.y + cons[i].pointB.y);
+            }
+            for (let i = 0, len = consBB.length; i < len; ++i) {
+                ctx.moveTo(consBB[i].bodyA.position.x, consBB[i].bodyA.position.y);
+                ctx.lineTo(consBB[i].bodyB.position.x, consBB[i].bodyB.position.y);
+            }
+            ctx.lineWidth = 2;
+            // ctx.strokeStyle = "#999";
+            ctx.strokeStyle = "rgba(0,0,0,0.15)";
+            ctx.stroke();
+        },
+        wireFrame() {
+            const bodies = Composite.allBodies(engine.world);
+            ctx.beginPath();
+            for (let i = 0; i < bodies.length; ++i) {
+                //ctx.fillText(bodies[i].id,bodies[i].position.x,bodies[i].position.y);  //shows the id of every body
+                let vertices = bodies[i].vertices;
+                ctx.moveTo(vertices[0].x, vertices[0].y);
+                for (let j = 1; j < vertices.length; j++) {
+                    ctx.lineTo(vertices[j].x, vertices[j].y);
+                }
+                ctx.lineTo(vertices[0].x, vertices[0].y);
+            }
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = "#000";
+            ctx.stroke();
+        },
+        testing() {
+            //jump
+            ctx.beginPath();
+            let bodyDraw = jumpSensor.vertices;
+            ctx.moveTo(bodyDraw[0].x, bodyDraw[0].y);
+            for (let j = 1; j < bodyDraw.length; ++j) {
+                ctx.lineTo(bodyDraw[j].x, bodyDraw[j].y);
+            }
+            ctx.lineTo(bodyDraw[0].x, bodyDraw[0].y);
+            ctx.fillStyle = "rgba(255, 0, 0, 0.5)";
+            ctx.fill();
+            // ctx.strokeStyle = "#000";
+            // ctx.stroke();
+            //main body
+            ctx.beginPath();
+            bodyDraw = playerBody.vertices;
+            ctx.moveTo(bodyDraw[0].x, bodyDraw[0].y);
+            for (let j = 1; j < bodyDraw.length; ++j) {
+                ctx.lineTo(bodyDraw[j].x, bodyDraw[j].y);
+            }
+            ctx.lineTo(bodyDraw[0].x, bodyDraw[0].y);
+            ctx.fillStyle = "rgba(0, 255, 255, 0.25)";
+            ctx.fill();
+            // ctx.stroke();
+            //head
+            ctx.beginPath();
+            bodyDraw = playerHead.vertices;
+            ctx.moveTo(bodyDraw[0].x, bodyDraw[0].y);
+            for (let j = 1; j < bodyDraw.length; ++j) {
+                ctx.lineTo(bodyDraw[j].x, bodyDraw[j].y);
+            }
+            ctx.lineTo(bodyDraw[0].x, bodyDraw[0].y);
+            ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+            ctx.fill();
+            // ctx.stroke();
+            //head sensor
+            ctx.beginPath();
+            bodyDraw = headSensor.vertices;
+            ctx.moveTo(bodyDraw[0].x, bodyDraw[0].y);
+            for (let j = 1; j < bodyDraw.length; ++j) {
+                ctx.lineTo(bodyDraw[j].x, bodyDraw[j].y);
+            }
+            ctx.lineTo(bodyDraw[0].x, bodyDraw[0].y);
+            ctx.fillStyle = "rgba(0, 0, 255, 0.25)";
+            ctx.fill();
+            // ctx.stroke();
+        },
+        font: {
+            word: new Path2D(),
+            xPos: 0,
+            yPos: 0,
+            drawString(text, x, y) {
+                this.xPos = x
+                this.yPos = y
+                const letters = text.toLowerCase().split('')
+                letters.forEach((letter, index) => {
+                    if (letter >= 'a' && letter <= 'z' && this[letter]) {
+                        this[letter]()
+                        if (index < letters.length - 1) {
+                            this.xPos += 29
+                        }
+                    } else if (letter === ' ') {
+                        this.xPos += 29
+                    }
+                })
+            },
+            a() {
+                this.word.moveTo(this.xPos - 1, this.yPos + 40)
+                this.word.lineTo(this.xPos + 10, this.yPos + 0)
+                this.word.lineTo(this.xPos + 21, this.yPos + 40)
+                this.word.moveTo(this.xPos + 5, this.yPos + 20)
+                this.word.lineTo(this.xPos + 15, this.yPos + 20)
+            },
+            b() {
+                this.word.moveTo(this.xPos + 1, this.yPos);
+                this.word.lineTo(this.xPos + 1, this.yPos + 40);
+                this.word.moveTo(this.xPos + 1, this.yPos);
+                this.word.bezierCurveTo(this.xPos + 22, this.yPos, this.xPos + 22, this.yPos + 20, this.xPos + 1, this.yPos + 20);
+                this.word.moveTo(this.xPos + 1, this.yPos + 20);
+                this.word.bezierCurveTo(this.xPos + 25, this.yPos + 20, this.xPos + 25, this.yPos + 40, this.xPos + 1, this.yPos + 40);
+            },
+            c() {
+                // Calculate the starting point on the ellipse to move to
+                const startAngle = 0.2 * Math.PI;
+                const startX = (this.xPos + 11) + (11 * Math.cos(startAngle));
+                const startY = (this.yPos + 20) + (20 * Math.sin(startAngle));
+                this.word.moveTo(startX, startY);
+
+                // Draws a smooth partial ellipse for the 'C'
+                this.word.ellipse(this.xPos + 11, this.yPos + 20, 11, 20, 0, startAngle, 1.8 * Math.PI);
+            },
+            d() {
+                this.word.moveTo(this.xPos + 0, this.yPos);
+                this.word.lineTo(this.xPos + 0, this.yPos + 40);
+                // this.word.moveTo(this.xPos + 3, this.yPos + 40);
+                this.word.arcTo(this.xPos + 19, this.yPos + 40, this.xPos + 19, this.yPos + 20, 20);
+                this.word.arcTo(this.xPos + 19, this.yPos, this.xPos + 1, this.yPos, 20);
+            },
+            e() {
+                this.word.moveTo(this.xPos + 19, this.yPos + 0)
+                this.word.lineTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 0, this.yPos + 20)
+                this.word.lineTo(this.xPos + 17, this.yPos + 20)
+                this.word.moveTo(this.xPos + 0, this.yPos + 20)
+                this.word.lineTo(this.xPos + 0, this.yPos + 40)
+                this.word.lineTo(this.xPos + 19, this.yPos + 40)
+            },
+            f() {
+                this.word.moveTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 0, this.yPos + 40)
+                this.word.moveTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 19, this.yPos + 0)
+                this.word.moveTo(this.xPos + 0, this.yPos + 20)
+                this.word.lineTo(this.xPos + 16, this.yPos + 20)
+            },
+            g() {
+                // Rounded G with curved edges
+                this.word.moveTo(this.xPos + 17, this.yPos + 6);
+                this.word.bezierCurveTo(this.xPos + 17, this.yPos + 2, this.xPos + 14, this.yPos + 0, this.xPos + 8, this.yPos + 0);
+                this.word.bezierCurveTo(this.xPos + 3, this.yPos + 0, this.xPos + 0, this.yPos + 4, this.xPos + 0, this.yPos + 20);
+                this.word.bezierCurveTo(this.xPos + 0, this.yPos + 36, this.xPos + 3, this.yPos + 40, this.xPos + 8, this.yPos + 40);
+                this.word.bezierCurveTo(this.xPos + 14, this.yPos + 40, this.xPos + 17, this.yPos + 36, this.xPos + 17, this.yPos + 30);
+                this.word.lineTo(this.xPos + 17, this.yPos + 20);
+                this.word.lineTo(this.xPos + 10, this.yPos + 20);
+            },
+            // g() {
+            //     this.word.moveTo(this.xPos + 17, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 40)
+            //     this.word.lineTo(this.xPos + 17, this.yPos + 40)
+            //     this.word.lineTo(this.xPos + 17, this.yPos + 20)
+            //     this.word.lineTo(this.xPos + 10, this.yPos + 20)
+            // },
+            h() {
+                this.word.moveTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 0, this.yPos + 40)
+                this.word.moveTo(this.xPos + 0, this.yPos + 20)
+                this.word.lineTo(this.xPos + 17, this.yPos + 20)
+                this.word.lineTo(this.xPos + 17, this.yPos + 40)
+                this.word.moveTo(this.xPos + 17, this.yPos + 20)
+                this.word.lineTo(this.xPos + 17, this.yPos + 0)
+            },
+            i() {
+                this.word.moveTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 19, this.yPos + 0)
+                this.word.moveTo(this.xPos + 9, this.yPos + 0)
+                this.word.lineTo(this.xPos + 9, this.yPos + 40)
+                this.word.moveTo(this.xPos + 0, this.yPos + 40)
+                this.word.lineTo(this.xPos + 19, this.yPos + 40)
+            },
+            // j() {
+            //     this.word.moveTo(this.xPos + 18, this.yPos + 0);
+            //     this.word.lineTo(this.xPos + 18, this.yPos + 40);
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 40);
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 30);
+            // },
+            j() {
+                // Rounded J with curved bottom
+                this.word.moveTo(this.xPos + 18, this.yPos + 0);
+                this.word.lineTo(this.xPos + 18, this.yPos + 30);
+                this.word.bezierCurveTo(this.xPos + 18, this.yPos + 37, this.xPos + 14, this.yPos + 40, this.xPos + 8, this.yPos + 40);
+                this.word.bezierCurveTo(this.xPos + 2, this.yPos + 40, this.xPos + 0, this.yPos + 37, this.xPos + 0, this.yPos + 30);
+            },
+            k() {
+                this.word.moveTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 0, this.yPos + 40)
+                this.word.moveTo(this.xPos + 0, this.yPos + 20)
+                this.word.lineTo(this.xPos + 19, this.yPos + 0)
+                this.word.moveTo(this.xPos + 4, this.yPos + 17)
+                this.word.lineTo(this.xPos + 19, this.yPos + 40)
+            },
+            l() {
+                this.word.moveTo(this.xPos + 1, this.yPos + 0)
+                this.word.lineTo(this.xPos + 1, this.yPos + 40)
+                this.word.lineTo(this.xPos + 20, this.yPos + 40)
+            },
+            m() {
+                this.word.moveTo(this.xPos + 0, this.yPos + 40)
+                this.word.lineTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 9, this.yPos + 20)
+                this.word.lineTo(this.xPos + 17, this.yPos + 0)
+                this.word.lineTo(this.xPos + 17, this.yPos + 40)
+            },
+            n() {
+                this.word.moveTo(this.xPos + 0, this.yPos + 40)
+                this.word.lineTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 17, this.yPos + 40)
+                this.word.lineTo(this.xPos + 17, this.yPos + 0)
+            },
+            o() {
+                this.word.moveTo(this.xPos + 20, this.yPos + 20);
+                this.word.ellipse(this.xPos + 9, this.yPos + 20, 11, 20, 0, 0, 2 * Math.PI);
+            },
+            p() {
+                // Rounded P with curved top section
+                this.word.moveTo(this.xPos + 0, this.yPos + 40);
+                this.word.lineTo(this.xPos + 0, this.yPos + 0);
+                this.word.lineTo(this.xPos + 10, this.yPos + 0);
+                this.word.bezierCurveTo(this.xPos + 15, this.yPos + 0, this.xPos + 18, this.yPos + 3, this.xPos + 18, this.yPos + 10);
+                this.word.bezierCurveTo(this.xPos + 18, this.yPos + 17, this.xPos + 15, this.yPos + 20, this.xPos + 10, this.yPos + 20);
+                this.word.lineTo(this.xPos + 0, this.yPos + 20);
+            },
+            // p() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 40)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 18, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 18, this.yPos + 20)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 20)
+            // },
+            q() {
+                this.word.moveTo(this.xPos + 20, this.yPos + 20);
+                this.word.ellipse(this.xPos + 9, this.yPos + 20, 11, 20, 0, 0, 2 * Math.PI);
+                this.word.moveTo(this.xPos + 12, this.yPos + 28);
+                this.word.lineTo(this.xPos + 20, this.yPos + 40);
+            },
+            r() {
+                // Rounded R with curved top section
+                this.word.moveTo(this.xPos + 0, this.yPos + 40);
+                this.word.lineTo(this.xPos + 0, this.yPos + 0);
+                this.word.lineTo(this.xPos + 10, this.yPos + 0);
+                this.word.bezierCurveTo(this.xPos + 15, this.yPos + 0, this.xPos + 18, this.yPos + 3, this.xPos + 18, this.yPos + 10);
+                this.word.bezierCurveTo(this.xPos + 18, this.yPos + 17, this.xPos + 15, this.yPos + 20, this.xPos + 10, this.yPos + 20);
+                this.word.lineTo(this.xPos + 0, this.yPos + 20);
+                this.word.moveTo(this.xPos + 8, this.yPos + 20);
+                this.word.lineTo(this.xPos + 18, this.yPos + 40);
+            },
+            // r() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 40)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 17, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 17, this.yPos + 20)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 20)
+            //     this.word.lineTo(this.xPos + 19, this.yPos + 40)
+            // },
+            // s() {
+            //     this.word.moveTo(this.xPos + 18, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 20)
+            //     this.word.lineTo(this.xPos + 18, this.yPos + 20)
+            //     this.word.lineTo(this.xPos + 18, this.yPos + 40)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 40)
+            // },
+            s() {
+                // Rounded S shape using curves
+                this.word.moveTo(this.xPos + 18, this.yPos + 6);
+                this.word.bezierCurveTo(this.xPos + 18, this.yPos + 2, this.xPos + 15, this.yPos + 0, this.xPos + 9, this.yPos + 0);
+                this.word.bezierCurveTo(this.xPos + 3, this.yPos + 0, this.xPos + 0, this.yPos + 3, this.xPos + 0, this.yPos + 8);
+                this.word.bezierCurveTo(this.xPos + 0, this.yPos + 13, this.xPos + 3, this.yPos + 16, this.xPos + 9, this.yPos + 18);
+                this.word.bezierCurveTo(this.xPos + 15, this.yPos + 20, this.xPos + 18, this.yPos + 24, this.xPos + 18, this.yPos + 32);
+                this.word.bezierCurveTo(this.xPos + 18, this.yPos + 37, this.xPos + 15, this.yPos + 40, this.xPos + 9, this.yPos + 40);
+                this.word.bezierCurveTo(this.xPos + 3, this.yPos + 40, this.xPos + 0, this.yPos + 37, this.xPos + 0, this.yPos + 34);
+            },
+            t() {
+                this.word.moveTo(this.xPos - 1, this.yPos + 0)
+                this.word.lineTo(this.xPos + 21, this.yPos + 0)
+                this.word.moveTo(this.xPos + 10, this.yPos + 0)
+                this.word.lineTo(this.xPos + 10, this.yPos + 40)
+            },
+            // u() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 40)
+            //     this.word.lineTo(this.xPos + 17, this.yPos + 40)
+            //     this.word.lineTo(this.xPos + 17, this.yPos + 0)
+            // },
+            u() {
+                // Rounded U with curved bottom
+                this.word.moveTo(this.xPos + 0, this.yPos + 0);
+                this.word.lineTo(this.xPos + 0, this.yPos + 30);
+                this.word.bezierCurveTo(this.xPos + 0, this.yPos + 37, this.xPos + 3, this.yPos + 40, this.xPos + 8, this.yPos + 40);
+                this.word.bezierCurveTo(this.xPos + 14, this.yPos + 40, this.xPos + 17, this.yPos + 37, this.xPos + 17, this.yPos + 30);
+                this.word.lineTo(this.xPos + 17, this.yPos + 0);
+            },
+            v() {
+                this.word.moveTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 8, this.yPos + 40)
+                this.word.lineTo(this.xPos + 17, this.yPos + 0)
+            },
+            w() {
+                this.word.moveTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 0, this.yPos + 40)
+                this.word.lineTo(this.xPos + 8, this.yPos + 20)
+                this.word.lineTo(this.xPos + 17, this.yPos + 40)
+                this.word.lineTo(this.xPos + 17, this.yPos + 0)
+            },
+            x() {
+                this.word.moveTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 19, this.yPos + 40)
+                this.word.moveTo(this.xPos + 19, this.yPos + 0)
+                this.word.lineTo(this.xPos + 0, this.yPos + 40)
+            },
+            y() {
+                this.word.moveTo(this.xPos + -1, this.yPos + 0);
+                this.word.lineTo(this.xPos + 10, this.yPos + 20);
+                this.word.lineTo(this.xPos + 21, this.yPos + 0);
+                this.word.moveTo(this.xPos + 10, this.yPos + 20);
+                this.word.lineTo(this.xPos + 10, this.yPos + 40);
+            },
+            z() {
+                this.word.moveTo(this.xPos + 0, this.yPos + 0)
+                this.word.lineTo(this.xPos + 17, this.yPos + 0)
+                this.word.lineTo(this.xPos + 0, this.yPos + 40)
+                this.word.lineTo(this.xPos + 17, this.yPos + 40)
+            }
+            //letters are 50 tall and 40 wide
+            // a() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 20, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 40, this.yPos + 50)
+            //     this.word.moveTo(this.xPos + 10, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 30, this.yPos + 25)
+            // },
+            // b() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 37)
+            //     this.word.lineTo(this.xPos + 10, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 12)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            // },
+            // c() {
+            //     this.word.moveTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            // },
+            // d() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            // },
+            // e() {
+            //     this.word.moveTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 25, this.yPos + 25)
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            // },
+            // f() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 27, this.yPos + 25)
+            // },
+            // g() {
+            //     this.word.moveTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 20, this.yPos + 25)
+            // },
+            // h() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            //     this.word.moveTo(this.xPos + 35, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 0)
+            // },
+            // i() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.moveTo(this.xPos + 17, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 17, this.yPos + 50)
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            // },
+            // j() {
+            //     this.word.moveTo(this.xPos + 34, this.yPos + 0);
+            //     this.word.lineTo(this.xPos + 34, this.yPos + 50);
+            //     this.word.lineTo(this.xPos + 3, this.yPos + 50);
+            //     this.word.lineTo(this.xPos + 3, this.yPos + 37);
+            // },
+            // k() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            // },
+            // l() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            // },
+            // m() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 18, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            // },
+            // n() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 0)
+            // },
+            // o() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 15)
+            //     this.word.lineTo(this.xPos + 18, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 15)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 35)
+            //     this.word.lineTo(this.xPos + 18, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 35)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 15)
+            // },
+            // p() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 25)
+            // },
+            // q() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 15)
+            //     this.word.lineTo(this.xPos + 18, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 15)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 35)
+            //     this.word.lineTo(this.xPos + 18, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 35)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 15)
+            //     this.word.moveTo(this.xPos + 20, this.yPos + 30)
+            //     this.word.lineTo(this.xPos + 40, this.yPos + 50)
+            // },
+            // r() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 30, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 30, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            // },
+            // s() {
+            //     this.word.moveTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            // },
+            // t() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 40, this.yPos + 0)
+            //     this.word.moveTo(this.xPos + 20, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 20, this.yPos + 50)
+            // },
+            // u() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 0)
+            // },
+            // v() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 17, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 0)
+            // },
+            // w() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 20, this.yPos + 25)
+            //     this.word.lineTo(this.xPos + 40, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 40, this.yPos + 0)
+            // },
+            // x() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            //     this.word.moveTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            // },
+            // y() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0);
+            //     this.word.lineTo(this.xPos + 20, this.yPos + 25);
+            //     this.word.lineTo(this.xPos + 40, this.yPos + 0);
+            //     this.word.moveTo(this.xPos + 20, this.yPos + 25);
+            //     this.word.lineTo(this.xPos + 20, this.yPos + 50);
+            // },
+            // z() {
+            //     this.word.moveTo(this.xPos + 0, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 0)
+            //     this.word.lineTo(this.xPos + 0, this.yPos + 50)
+            //     this.word.lineTo(this.xPos + 35, this.yPos + 50)
+            // }
+        }
+    },
+    checkLineIntersection(v1, v1End, v2, v2End) {
+        // if the lines intersect, the result contains the x and y of the intersection (treating the lines as infinite) and booleans for whether line segment 1 or line segment 2 contain the point
+        let denominator, a, b, numerator1, numerator2;
+        let result = {
+            x: null,
+            y: null,
+            onLine1: false,
+            onLine2: false
+        };
+        denominator = (v2End.y - v2.y) * (v1End.x - v1.x) - (v2End.x - v2.x) * (v1End.y - v1.y);
+        if (denominator == 0) {
+            return result;
+        }
+        a = v1.y - v2.y;
+        b = v1.x - v2.x;
+        numerator1 = (v2End.x - v2.x) * a - (v2End.y - v2.y) * b;
+        numerator2 = (v1End.x - v1.x) * a - (v1End.y - v1.y) * b;
+        a = numerator1 / denominator;
+        b = numerator2 / denominator;
+
+        // if we cast these lines infinitely in both directions, they intersect here:
+        result.x = v1.x + a * (v1End.x - v1.x);
+        result.y = v1.y + a * (v1End.y - v1.y);
+        // if line1 is a segment and line2 is infinite, they intersect if:
+        if (a > 0 && a < 1) result.onLine1 = true;
+        // if line2 is a segment and line1 is infinite, they intersect if:
+        if (b > 0 && b < 1) result.onLine2 = true;
+        // if line1 and line2 are segments, they intersect if both of the above are true
+        return result;
+    },
+    constructMouseDownPosition: {
+        x: 0,
+        y: 0
+    },
+    constructMapString: [],
+    constructCycle() {
+        if (simulation.isConstructionMode && simulation.constructMouseDownPosition) {
+            function round(num, round = 25) {
+                return Math.ceil(num / round) * round;
+            }
+            const x = round(simulation.constructMouseDownPosition.x)
+            const y = round(simulation.constructMouseDownPosition.y)
+            const dx = Math.max(25, round(simulation.mouseInGame.x) - x)
+            const dy = Math.max(25, round(simulation.mouseInGame.y) - y)
+
+            ctx.strokeStyle = "#000"
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, dx, dy);
+        }
+    },
+    enableConstructMode() {
+        tech.giveTech('motion sickness') //for precise mouse control
+        level.isProcedural = false //this is set to be true in levels like labs that need x+ and y+ in front of positions
+        level.isVerticalFLipLevel = false
+        simulation.isConstructionMode = true;
+        simulation.isHorizontalFlipped = false;
+        simulation.isAutoZoom = false;
+        simulation.zoomScale = 2600;
+        simulation.setZoom();
+
+        document.body.addEventListener("mouseup", (e) => {
+            let len
+            if (simulation.testing && simulation.constructMouseDownPosition) {
+                function round(num, round = 25) {
+                    return Math.ceil(num / round) * round;
+                }
+                //clean up positions
+                const x = round(simulation.constructMouseDownPosition.x)
+                const y = round(simulation.constructMouseDownPosition.y)
+                const dx = Math.max(25, round(simulation.mouseInGame.x) - x)
+                const dy = Math.max(25, round(simulation.mouseInGame.y) - y)
+                if (e.button === 1) {
+                    simulation.outputMapString(`[${x}, ${y}],\n`);
+                } else if (e.button === 4) {
+                    simulation.outputMapString(`${Math.floor(simulation.constructMouseDownPosition.x)}, ${Math.floor(simulation.constructMouseDownPosition.y)} `);
+                } else if (simulation.mouseInGame.x > simulation.constructMouseDownPosition.x && simulation.mouseInGame.y > simulation.constructMouseDownPosition.y) { //make sure that the width and height are positive
+                    if (e.button === 0) { //add map
+                        // if (level.isProcedural) {
+                        //     simulation.outputMapString(`spawn.mapRect(x+${x}, ${y}, ${dx}, ${dy});\n`);
+                        // } else {
+                        //     simulation.outputMapString(`spawn.mapRect(${x}, ${y}, ${dx}, ${dy});\n`);
+                        // }
+                        if (level.isProcedural) {
+                            simulation.outputMapString(`spawn.mapRect(x+${x}, ${y}, ${dx}, ${dy});\n`);
+                        } else if (level.isVerticalFLipLevel) {
+                            simulation.outputMapString(`spawn.mapRect(${x}, ${y}, ${dx}, ${dy});\n`);
+                            simulation.outputMapString(`//spawn.mapRect(${x}, ${-y - dy}, ${dx}, ${dy});\n`);
+                        } else {
+                            simulation.outputMapString(`spawn.mapRect(${x}, ${y}, ${dx}, ${dy});\n`);
+                        }
+                        //see map in world
+                        spawn.mapRect(x, y, dx, dy);
+                        len = map.length - 1
+                        map[len].collisionFilter.category = cat.map;
+                        map[len].collisionFilter.mask = cat.player | cat.map | cat.body | cat.bullet | cat.powerUp | cat.mob | cat.mobBullet;
+                        Matter.Body.setStatic(map[len], true); //make static
+                        Composite.add(engine.world, map[len]); //add to world
+                        simulation.draw.setPaths() //update map graphics
+                    } else if (e.button === 2) { //add body
+                        if (level.isProcedural) {
+                            simulation.outputMapString(`spawn.bodyRect(x+${x}, ${y}, ${dx}, ${dy});\n`);
+                        } else {
+                            simulation.outputMapString(`spawn.bodyRect(${x}, ${y}, ${dx}, ${dy});\n`);
+                        }
+                        //see map in world
+                        spawn.bodyRect(x, y, dx, dy);
+                    }
+                }
+            }
+            simulation.constructMouseDownPosition.x = undefined
+            simulation.constructMouseDownPosition.y = undefined
+        });
+        simulation.constructMouseDownPosition.x = undefined
+        simulation.constructMouseDownPosition.y = undefined
+        document.body.addEventListener("mousedown", (e) => {
+            if (simulation.testing) {
+                simulation.constructMouseDownPosition.x = simulation.mouseInGame.x
+                simulation.constructMouseDownPosition.y = simulation.mouseInGame.y
+            }
+        });
+
+        document.body.addEventListener("wheel", (e) => {
+            if (e.deltaY > 0) {
+                simulation.setZoom(simulation.zoomScale / 0.9)
+            } else {
+                simulation.setZoom(simulation.zoomScale * 0.9)
+            }
+        });
+
+
+
+
+        //undo last element added after you press z
+        document.body.addEventListener("keydown", (event) => { // e.keyCode   z=90  m=77 b=66  shift = 16  c = 67
+            if (simulation.testing && event.code === "KeyZ" && simulation.constructMapString.length) {
+                if (simulation.constructMapString[simulation.constructMapString.length - 1][6] === 'm') { //remove map from current level
+                    const index = map.length - 1
+                    Matter.Composite.remove(engine.world, map[index]);
+                    map.splice(index, 1);
+                    simulation.draw.setPaths() //update map graphics  
+                } else if (simulation.constructMapString[simulation.constructMapString.length - 1][6] === 'b') { //remove body from current level
+                    const index = body.length - 1
+                    Matter.Composite.remove(engine.world, body[index]);
+                    body.splice(index, 1);
+                }
+                simulation.constructMapString.pop();
+                simulation.outputMapString();
+            }
+        });
+    },
+    outputMapString(string) {
+        if (string) simulation.constructMapString.push(string) //store command as a string in the next element of an array
+        let out = "" //combine set of map strings to one string
+        let outHTML = ""
+        for (let i = 0, len = simulation.constructMapString.length; i < len; i++) {
+            out += simulation.constructMapString[i];
+            outHTML += "<div>" + simulation.constructMapString[i] + "</div>"
+        }
+        console.log(out) // eslint-disable-line no-console
+        navigator.clipboard.writeText(out).then(function () {
+            /* clipboard successfully set */
+        }, function () {
+            /* clipboard write failed */
+            console.log('copy failed') // eslint-disable-line no-console
+        });
+        document.getElementById("construct").innerHTML = outHTML
+    },
+};
