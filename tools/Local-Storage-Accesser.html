@@ -1,0 +1,75 @@
+<html>
+    <head>
+        <style>
+            body{
+                overflow:hidden;
+                display:flex;;
+                flex-direction: column;
+                justify-content:start;
+                align-items:center;
+                gap:10px;
+            }
+
+            .button {
+                background-color: #007bff;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 14px;
+                cursor: pointer;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                transition: background 0.2s;
+            }
+
+            /* Changes color when you hover over it */
+            button:hover {
+                background-color: #0056b3;
+            }
+
+            #PrintLocalStorage{
+                width:100%;
+                height:30%;
+            }
+
+            #ImportLocalStorage{
+                width:100%;
+                height:30%;
+            }
+        </style>
+    </head>
+    <body>
+        <p>Local Storage Acceser</p>
+        <p>This is used to import and export localstorage saves</p>
+        <button onclick="ExportClicked()" class="button"> Export Local Storage </button>
+        <textarea placeholder="Exported text should appear here" id="PrintLocalStorage"></textarea>
+        <button onclick="ImportClicked()" class="button"> Import Local Storage </button>
+        <textarea placeholder="Exported text should appear here" id="ImportLocalStorage"></textarea>
+        <script>
+            const ExportedTextArea = document.getElementById('PrintLocalStorage');
+            const ImportedTextArea = document.getElementById('ImportLocalStorage'); 
+ 
+            function ExportClicked(){ 
+                ExportedTextArea.value = JSON.stringify(localStorage); 
+            };
+
+            function ImportClicked() {
+                try {
+                    const data = JSON.parse(ImportedTextArea.value);
+                    
+                    localStorage.clear();
+                    for (const key in data) {
+                        if (data.hasOwnProperty(key)) {
+                            localStorage.setItem(key, data[key]);
+                        }
+                    }
+                    
+                    alert("Local Storage imported successfully!");
+                } catch (error) {
+                    alert("Failed to import. Please make sure the JSON text is valid.");
+                    console.error(error);
+                }
+            }
+        </script>
+    </body>
+</html>
