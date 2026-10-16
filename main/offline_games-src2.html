@@ -248,9 +248,9 @@
                     window.location.href = "index.html"
                 }
 
-                if (gameFile == "N-gon"){
-                    console.log("check worked succesfully")
-                    window.location.href = "../other_offline-html/" + gameFile + "/index.html"
+                if (gameFile.toLowerCase() === "n-gon") {
+                    window.location.href = "https://puffcodewebsite.b-cdn.net/other_offline-html/n-gon/index.html";
+                    return;
                 }
 
                 window.location.href = "../other_offline-html/" + gameFile
