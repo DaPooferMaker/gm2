@@ -65,7 +65,7 @@
         #TopNav {
             position:relative;
             width:100%;
-            height:10%;
+            height:5%;
             display:flex;
             left:0px;
             top:0px;
@@ -196,10 +196,10 @@
     <script>
 
         const games = [
-        "brotato.html",
         "brotato-new.html",
         "idle-dice.html",
-        "n-gon"
+        "n-gon",
+        "clover-pit.html"
 ];
 
         const gameList = document.getElementById("GameList");
@@ -228,13 +228,6 @@
             let p_tag = document.createElement("p")
             p_tag.textContent = gameName
             p_tag.className= "OfflineGameButton-text"
-
-            if (gameName == "Cc K"){
-                p_tag.textContent = "cookie-clicker kaizo"
-            } 
-            if (gameName == "Cc Working"){
-                p_tag.textContent = "cookie-clicker Working Version"
-            }
 
             button.appendChild(p_tag)
 
