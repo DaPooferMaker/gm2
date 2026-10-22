@@ -1,0 +1,222 @@
+:root {
+  --bg: #111;
+  --fg: #eee;
+  --disabled-accent: #2b746f;
+  --accent: #66fcf1;
+  --hover-accent: #5ae2e0;
+  --active-accent: #358888;
+  --muted: #888;
+  --border: #333;
+  --danger: #e74c3c;
+  --card: #1f1f1f;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+.container {
+  max-width: 900px;
+  margin: auto;
+  padding: 2rem;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--accent);
+}
+
+section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  border-radius: 8px;
+}
+
+.options {
+    margin: auto;
+    width: fit-content
+}
+
+.options label {
+  margin-right: 1rem;
+}
+
+input[type="text"] {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+}
+
+button {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  padding: 0.5rem 1rem;
+  margin: 0.25rem;
+  cursor: pointer;
+  border-radius: 4px;
+  font-weight: bold;
+  transition: background 0.2s ease;
+}
+
+button[disabled] {
+  background: var(--disabled-accent);
+  cursor: not-allowed;
+}
+
+button.hidden {
+  display: none;
+}
+
+button:not([disabled]):hover {
+  background: var(--hover-accent);
+}
+
+button:not([disabled]):active {
+  background: var(--active-accent);
+}
+
+progress {
+  width: 100%;
+  height: 20px;
+  margin-top: 0.5rem;
+  appearance: none;
+}
+
+progress::-webkit-progress-bar {
+  background-color: #333;
+  border-radius: 4px;
+}
+
+progress::-webkit-progress-value {
+  background-color: var(--accent);
+  border-radius: 4px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--card);
+}
+
+table th, table td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 1rem;
+  text-align: left;
+}
+
+table th {
+  background: #222;
+}
+
+.modal {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.75);
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background-color: var(--card);
+  padding: 2rem;
+  border-radius: 12px;
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+  color: var(--fg);
+  position: relative;
+  border: 1px solid var(--danger);
+}
+
+.modal-content h2 {
+  color: var(--danger);
+}
+
+.modal-content p {
+  margin: 1rem 0 0 0;
+}
+
+.close {
+  position: absolute;
+  top: 0.5rem;
+  right: 1rem;
+  font-size: 1.5rem;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.addMods {
+  width: fit-content;
+  margin: auto;
+  text-align: center;
+}
+
+.center {
+  width: fit-content;
+  margin: auto;
+}
+
+label {
+  user-select: none;
+}
+
+#parseBtn {
+  height: 5em;
+  width: 8em;
+}
+
+.leftAlign {
+  text-align: left;
+}
+
+#loadedName {
+  display: inline;
+}
+
+label[for=makeName] {
+  color: var(--accent);
+}
+
+input#makeName {
+  width: 80%;
+  background-color: var(--border);
+  color: white
+}
+
+.makeName {
+  margin: auto;
+  text-align: center;
+}
+
+.game {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+canvas#canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}

@@ -196,15 +196,26 @@
     <script>
 
         const games = [
-        "brotato-new.html",
-        "idle-dice.html",
+        "brotato-new",
+        "idle-dice",
         "n-gon",
-        "clover-pit.html"
+        "clover-pit",
+        "balatro-port",
+        "balatro"
 ];
+
+        const FileUrl = [
+            "brotato-new.html",
+            "idle-dice.html",
+            "n-gon/index.html",
+            "clover-pit.html",
+            "balatro-port/index.html",
+            "balatro/index.html"         
+        ]
 
         const gameList = document.getElementById("GameList");
 
-        games.forEach(function(gameFile) {
+        games.forEach(function(gameFile, index) {
 
             // Create a button
             const button = document.createElement("button");
@@ -246,7 +257,7 @@
                     return;
                 }
 
-                window.location.href = "../other_offline-html/" + gameFile
+                window.location.href = "../other_offline-html/" + FileUrl[index]
                 
             };
 

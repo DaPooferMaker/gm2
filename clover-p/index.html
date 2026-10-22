@@ -1,0 +1,223 @@
+<html lang="en-us"><head>
+    <base href="../">
+<script>
+(function() {
+  const ROOT_BASE = "https://cdn.jsdelivr.net/";
+  const ASSET_DIR_BASE = "https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/";
+  const JSDELIVR_GH_BASE = "https://cdn.jsdelivr.net/gh/";
+  const STATICALLY_GH_BASE = "https://cdn.jsdelivr.net/gh/";
+
+  function resolve(url) {
+    if (typeof url !== 'string' || !url) return url;
+    if (url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://') || url.startsWith('//')) return url;
+    let p = url;
+    if (p.startsWith('/')) {
+      p = p.slice(1);
+      if (p.startsWith('next/')) return ASSET_DIR_BASE + p;
+      if (p.startsWith('static/games/')) p = p.replace('static/games/', '');
+      return ROOT_BASE + p;
+    }
+    return ASSET_DIR_BASE + url;
+  }
+
+  function postNavigate(url) {
+    try { parent.postMessage({ __yukios: 'navigate', url }, '*'); } catch {}
+  }
+
+  const createElement = document.createElement.bind(document);
+  document.createElement = function(tag) {
+    const el = createElement(tag);
+    const tagName = tag.toLowerCase();
+
+    if (tagName === 'iframe' || tagName === 'frame') {
+      Object.defineProperty(el, 'src', {
+        get() { return el.getAttribute('src'); },
+        set(val) { el.setAttribute('src', resolve(val)); },
+        configurable: true
+      });
+    }
+    return el;
+  };
+
+  const setAttribute = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function(name, value) {
+    const tagName = this.tagName.toLowerCase();
+    const attrName = name.toLowerCase();
+    if ((tagName === 'iframe' || tagName === 'frame' || tagName === 'script' || tagName === 'img') && attrName === 'src') {
+      value = resolve(value);
+    } else if ((tagName === 'link' || tagName === 'a') && attrName === 'href') {
+      value = resolve(value);
+    }
+    return setAttribute.call(this, name, value);
+  };
+
+  document.addEventListener('click', function(e) {
+    const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!a) return;
+    const rawHref = a.getAttribute('href');
+    if (!rawHref || rawHref[0] === '#' || /^javascript:/i.test(rawHref)) return;
+    if (typeof url === 'string' && (url.startsWith(JSDELIVR_GH_BASE) || url.startsWith(STATICALLY_GH_BASE) || url.startsWith('blob:'))) {
+      e.preventDefault();
+      postNavigate(url);
+    }
+  }, true);
+
+  document.addEventListener('submit', function(e) {
+    const form = e.target;
+    if (!form || !form.getAttribute) return;
+    const action = form.getAttribute('action') || document.baseURI;
+    let url = null;
+    try { url = new URL(action, document.baseURI).href; } catch { return; }
+    if (typeof url === 'string' && (url.startsWith(JSDELIVR_GH_BASE) || url.startsWith(STATICALLY_GH_BASE) || url.startsWith('blob:'))) {
+      e.preventDefault();
+      postNavigate(url);
+    }
+  }, true);
+})();
+</script>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>CloverPit</title>
+    <link rel="shortcut icon" href="https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/TemplateData/favicon.ico">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/TemplateData/style.css">
+  <style>
+
+</style>
+</head>
+  <body>
+    <div id="loading-text" style="color: white; font-size: 48px; font-family: cursive; text-align: center; margin-top: 20px;">LOADING... 86.96 MB / 86.96 MB</div>
+    <div id="unity-container">
+      <canvas id="unity-canvas" width="960" height="540" tabindex="-1"></canvas>
+      <div id="unity-loading-bar" style="display: block;">
+        <div id="unity-logo"></div>
+        <div id="unity-progress-bar-empty">
+          <div id="unity-progress-bar-full"></div>
+        </div>
+      </div>
+      <div id="unity-warning"> </div>
+    </div>
+    <script>
+      var loadingText = document.querySelector("#loading-text");
+    let totalBytes = 0;
+    let loadedBytes = 0;
+
+    async function fetchWithProgress(url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status} while loading ${url}`);
+      if (!response.body) throw new Error(`Streaming response unavailable for ${url}`);
+      const reader = response.body.getReader();
+      let chunks = [];
+      let received = 0;
+      while (true) {
+        const {
+          done,
+          value
+        } = await reader.read();
+        if (done) break;
+        received += value.length;
+        loadedBytes += value.length;
+        chunks.push(value);
+        let mbDone = (loadedBytes / (1024 * 1024)).toFixed(2);
+        let mbTotal = '86.96';
+        loadingText.textContent = `LOADING... ${mbDone} MB / ${mbTotal} MB`;
+      }
+      let fullBuffer = new Uint8Array(received);
+      let offset = 0;
+      for (let chunk of chunks) {
+        fullBuffer.set(chunk, offset);
+        offset += chunk.length;
+      }
+      return fullBuffer.buffer;
+    }
+
+    async function mergeFiles(fileParts, cacheKey) {
+      const buffers = await Promise.all(
+        fileParts.map(part => fetchWithProgress(part))
+      );
+      const mergedBlob = new Blob(buffers);
+      return URL.createObjectURL(mergedBlob);
+    }
+
+    function getParts(file, start, end) {
+      let parts = [];
+      for (let i = start; i <= end; i++) {
+        parts.push(file + ".part" + i);
+      }
+      return parts;
+    }
+async function makePersistentFrameworkUrl(buildUrl) {
+  const response = await fetch(buildUrl + "/CloverPit.framework.js");
+  if (!response.ok) throw new Error("Failed to load Unity framework");
+  let source = await response.text();
+  const needle = 'Module.__unityIdbfsMount=FS.mount(IDBFS,{autoPersist:!!Module["autoSyncPersistentDataPath"]},"/idbfs");Module.addRunDependency("JS_FileSystem_Mount");';
+  const replacement = 'Module.__unityIdbfsMount=FS.mount(IDBFS,{autoPersist:!!Module["autoSyncPersistentDataPath"]},"/idbfs");try{FS.mkdir("/SaveData")}catch(e){}Module.__cloverSaveMount=FS.mount(IDBFS,{autoPersist:!!Module["autoSyncPersistentDataPath"]},"/SaveData");Module.addRunDependency("JS_FileSystem_Mount");';
+  if (!source.includes(needle)) throw new Error("Unity filesystem hook not found");
+  source = source.replace(needle, replacement);
+  return URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+}
+        (async () => {
+      const [dataUrl, wasmUrl] = await Promise.all([
+        mergeFiles(getParts("Build/CloverPit.data", 1, 3), "CloverPit.data"),
+        mergeFiles(getParts("Build/CloverPit.wasm", 1, 3), "CloverPit.wasm"),
+      ]);
+
+      var container = document.querySelector("#unity-container");
+      var canvas = document.querySelector("#unity-canvas");
+      var loadingBar = document.querySelector("#unity-loading-bar");
+      var progressBarFull = document.querySelector("#unity-progress-bar-full");
+      var warningBanner = document.querySelector("#unity-warning");
+
+      function unityShowBanner(msg, type) {
+      }
+
+      var buildUrl = "https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/Build";
+      var loaderUrl = buildUrl + "/CloverPit.loader.js";
+      var frameworkUrl = await makePersistentFrameworkUrl(buildUrl);
+      var config = {
+        arguments: [],
+        dataUrl: dataUrl,
+        frameworkUrl: frameworkUrl,
+        codeUrl: wasmUrl,
+        streamingAssetsUrl: "https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/StreamingAssets",
+        companyName: "Panik Arcade",
+        productName: "CloverPit",
+        productVersion: "1.3",
+        autoSyncPersistentDataPath: true,
+        showBanner: unityShowBanner,
+      };
+
+
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        var meta = document.createElement('meta');
+        meta.name = 'viewport';
+        meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+        document.getElementsByTagName('head')[0].appendChild(meta);
+      }
+
+
+      loadingBar.style.display = "block";
+
+      var script = document.createElement("script");
+      script.src = loaderUrl;
+      script.onload = () => {
+        loadingText.textContent = "STARTING UNITY...";
+        createUnityInstance(canvas, config, (progress) => {
+          progressBarFull.style.width = 100 * progress + "%";
+          loadingText.textContent = `STARTING UNITY... ${Math.round(progress * 100)}%`;
+        }).then((unityInstance) => {
+          loadingBar.style.display = "none";
+          loadingText.remove();
+        }).catch((message) => {
+          console.error(message);
+          loadingText.textContent = "UNITY ERROR: " + message;
+        });
+      };
+      script.onerror = (event) => {
+        console.error("Failed to load Unity loader", event);
+        loadingText.textContent = "FAILED TO LOAD UNITY LOADER";
+      };
+      document.body.appendChild(script);
+    })();
+    </script>
+
+<script></script></body></html>
