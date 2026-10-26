@@ -23,6 +23,12 @@
 
 <body>
     <div id="loading-textt" style="color: black; font-size: 48px; font-family: cursive; text-align: center; margin-top: 20px;">LOADING DOT.NET...</div>
+    <script>
+        window.onerror = function (message, source, lineno, colno, error) {
+            alert("Error: " + message);
+            return true;
+        };
+    </script>
 </body>
 
 </html>
