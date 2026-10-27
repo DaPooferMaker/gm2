@@ -1,11 +1,11 @@
 <html lang="en-us"><head>
-    <base href="../">
+    <base href="./">
 <script>
 (function() {
-  const ROOT_BASE = "https://cdn.jsdelivr.net/";
-  const ASSET_DIR_BASE = "https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/";
-  const JSDELIVR_GH_BASE = "https://cdn.jsdelivr.net/gh/";
-  const STATICALLY_GH_BASE = "https://cdn.jsdelivr.net/gh/";
+  const ROOT_BASE = "";
+  const ASSET_DIR_BASE = "";
+  const JSDELIVR_GH_BASE = "";
+  const STATICALLY_GH_BASE = "";
 
   function resolve(url) {
     if (typeof url !== 'string' || !url) return url;
@@ -55,6 +55,7 @@
     const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
     if (!a) return;
     const rawHref = a.getAttribute('href');
+    const url = new URL(rawHref, document.baseURI).href;
     if (!rawHref || rawHref[0] === '#' || /^javascript:/i.test(rawHref)) return;
     if (typeof url === 'string' && (url.startsWith(JSDELIVR_GH_BASE) || url.startsWith(STATICALLY_GH_BASE) || url.startsWith('blob:'))) {
       e.preventDefault();
@@ -78,8 +79,8 @@
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>CloverPit</title>
-    <link rel="shortcut icon" href="https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/TemplateData/favicon.ico">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/TemplateData/style.css">
+    <link rel="shortcut icon" href="TemplateData/favicon.ico">
+    <link rel="stylesheet" href="TemplateData/style.css">
   <style>
 
 </style>
@@ -170,7 +171,7 @@ async function makePersistentFrameworkUrl(buildUrl) {
       function unityShowBanner(msg, type) {
       }
 
-      var buildUrl = "https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/Build";
+      var buildUrl = "Build";
       var loaderUrl = buildUrl + "/CloverPit.loader.js";
       var frameworkUrl = await makePersistentFrameworkUrl(buildUrl);
       var config = {
@@ -178,7 +179,7 @@ async function makePersistentFrameworkUrl(buildUrl) {
         dataUrl: dataUrl,
         frameworkUrl: frameworkUrl,
         codeUrl: wasmUrl,
-        streamingAssetsUrl: "https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/StreamingAssets",
+        streamingAssetsUrl: "StreamingAssets",
         companyName: "Panik Arcade",
         productName: "CloverPit",
         productVersion: "1.3",
