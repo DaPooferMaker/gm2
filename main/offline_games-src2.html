@@ -93,12 +93,39 @@
 
 <script src="../fernet.txt"></script>
 
+    <!-- Utilities -->
+    <script>
+    async function fetchJSONData(directory) {
+        const url = directory; // Replace with your local path or remote URL
+
+        try {
+            const response = await fetch(url);
+            
+            // Check if the request was successful
+            if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            
+            // Parse the response body as JSON
+            const data = await response.json();
+            console.log(data); // Work with your data here
+            return data
+            
+        } catch (error) {
+            console.error('Failed to fetch JSON:', error);
+        }
+        }
+    </script>
+
     <script type="module">
-        const SALT = "my-fixed-salt-2026";
+        const TokenData = await fetchJSONData("../token_info.json")
+        console.log(TokenData)
+
+        const SALT = TokenData['salt'];
+        let encryptedMsg = TokenData["encrypted"];
+        const DecryptedMessage = TokenData["unencrypted"]
         const ITERATIONS = 600000;
 
-        let encryptedMsg =
-            "gAAAAABqs0G7zdpt-VXK3T3rostZr14xz569fcgDae41Q-n31n0JBSwuwa0v_7GvZpjhbpDXTwX43MWy5StP7j_2uQFiaS2kXg==";
 
         async function deriveFernetKey(password) {
             const encoder = new TextEncoder();
@@ -162,7 +189,7 @@
             console.log("redirecting...")
             let decrypted_msg = await decryptMessage(encryptedMsg, savedToken);
 
-            if (decrypted_msg !== "PHWLK") {
+            if (decrypted_msg !== DecryptedMessage) {
                 window.location.href = "../index.html";
 
             }

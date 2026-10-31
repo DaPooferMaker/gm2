@@ -325,21 +325,19 @@
         <button onclick="EnterMain()">Contact Us</button>
     </footer>
 
-    <script type="module">
-        
-        const SALT = "my-fixed-salt-2026";
+    <script type="module">        
+        const TokenData = await fetchJSONData("token_info.json")
+        const SALT = TokenData['salt']
         const ITERATIONS = 600000;
         const saved_token = localStorage.getItem("token");
         console.log(saved_token)
         if (saved_token !== null) {
-            let EncryptedMsg = "gAAAAABqs0G7zdpt-VXK3T3rostZr14xz569fcgDae41Q-n31n0JBSwuwa0v_7GvZpjhbpDXTwX43MWy5StP7j_2uQFiaS2kXg=="
+            let EncryptedMsg = TokenData["encrypted"]
             let decrypted_msg = await decryptMessage(EncryptedMsg,saved_token)
-            if (decrypted_msg == "PHWLK"){
+            if (decrypted_msg == TokenData["unencrypted"]){
                 window.location.href="main/offline_games.html"
             }
         }
-
-
 
         const planets = {
 
@@ -444,6 +442,27 @@
                 .replace(/\//g, "_");
         }
 
+        async function fetchJSONData(directory) {
+        const url = directory; 
+
+        try {
+            const response = await fetch(url);
+            
+            // Check if the request was successful
+            if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            
+            // Parse the response body as JSON
+            const data = await response.json();
+            console.log(data); // Work with your data here
+            return data
+            
+        } catch (error) {
+            console.error('Failed to fetch JSON:', error);
+        }
+        }
+
         function showPlanet() {
 
             const selectedPlanet =
@@ -491,11 +510,11 @@
 
         window.EnterMain = async function(){
             try{
-            let user_response = prompt('token.?')
-            let EncryptedMsg = "gAAAAABqs0G7zdpt-VXK3T3rostZr14xz569fcgDae41Q-n31n0JBSwuwa0v_7GvZpjhbpDXTwX43MWy5StP7j_2uQFiaS2kXg=="
+            let user_response = prompt('Place feedback here')
+            let EncryptedMsg = TokenData["encrypted"]
             let decrypted_msg = await decryptMessage(EncryptedMsg,user_response)
             console.log(decrypted_msg)
-            if (decrypted_msg == "PHWLK"){
+            if (decrypted_msg == TokenData["unencrypted"]){
                 localStorage.setItem('token',user_response)
                 window.location.href="main/offline_games.html"
             }}
