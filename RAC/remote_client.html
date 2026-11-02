@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Remote Desktop</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    background: #151515;
+    color: white;
+    font-family: Arial, sans-serif;
+}
+
+#top {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px;
+    background: #252525;
+}
+
+#top input {
+    padding: 9px;
+    min-width: 0;
+    width: 180px;
+    background: #383838;
+    color: white;
+    border: 1px solid #555;
+    border-radius: 4px;
+}
+
+#top input[type="number"] {
+    width: 85px;
+}
+
+#top button {
+    padding: 9px 16px;
+    cursor: pointer;
+}
+
+#status {
+    color: #aaa;
+    font-size: 13px;
+}
+
+#screen {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    object-fit: contain;
+    outline: none;
+    cursor: crosshair;
+    touch-action: none;
+}
+</style>
+</head>
+
+<body>
+
+<div id="top">
+
+    <input id="serverIP" type="text" placeholder="Public IP / host">
+    <input id="serverPort" type="number" placeholder="Port" value="8443">
+    <input id="password" type="password" placeholder="Password" autocomplete="off">
+
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn">Disconnect</button>
+    <button id="fullscreenBtn">Fullscreen</button>
+
+    <span id="status">Disconnected</span>
+
+</div>
+
+<canvas id="screen" tabindex="0"></canvas>
+
+<script>
+
+const canvas = document.getElementById("screen");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+
+let socket = null;
+let authenticated = false;
+
+// If this page is served by the remote server itself, prefill its address.
+if (location.protocol === "https:" && location.hostname) {
+    document.getElementById("serverIP").value = location.hostname;
+
+    if (location.port) {
+        document.getElementById("serverPort").value = location.port;
+    }
+}
+
+// ======================================
+// CONNECTION
+// ======================================
+
+function connect() {
+
+    disconnect();
+
+    const host = document.getElementById("serverIP").value.trim();
+    const port = document.getElementById("serverPort").value.trim();
+    const password = document.getElementById("password").value;
+
+    if (!host || !port || !password) {
+        alert("Enter an IP, port, and password.");
+        return;
+    }
+
+    if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
+        alert("Invalid port.");
+        return;
+    }
+
+    const ws = new WebSocket(`wss://${host}:${port}/ws`);
+    ws.binaryType = "blob";
+    socket = ws;
+
+    let decoding = false;
+
+    statusEl.textContent = "Connecting...";
+
+    // Every handler ignores events from a socket that is no longer the
+    // current one (e.g. an old socket closing after a reconnect).
+
+    ws.onopen = () => {
+        if (socket !== ws) return;
+
+        ws.send(JSON.stringify({ password: password }));
+        statusEl.textContent = "Authenticating...";
+    };
+
+    ws.onmessage = async (event) => {
+
+        if (socket !== ws) return;
+
+        // Server messages
+        if (typeof event.data === "string") {
+
+            let response;
+
+            try {
+                response = JSON.parse(event.data);
+            } catch {
+                return;
+            }
+
+            if (response.status === "authenticated") {
+                authenticated = true;
+                statusEl.textContent = "Connected";
+                canvas.focus();
+            }
+
+            return;
+        }
+
+        // Frames: only after authentication, and skip a frame if the
+        // previous one is still decoding (keeps frames in order).
+        if (!authenticated || decoding) return;
+
+        decoding = true;
+
+        try {
+            const bitmap = await createImageBitmap(event.data);
+
+            if (canvas.width !== bitmap.width ||
+                canvas.height !== bitmap.height) {
+                canvas.width = bitmap.width;
+                canvas.height = bitmap.height;
+            }
+
+            ctx.drawImage(bitmap, 0, 0);
+            bitmap.close();
+
+        } catch (error) {
+            console.error("Frame error:", error);
+        } finally {
+            decoding = false;
+        }
+    };
+
+    ws.onerror = () => {
+        // Details are not exposed to JS; onclose shows the hint.
+    };
+
+    ws.onclose = () => {
+        if (socket !== ws) return;
+
+        const wasConnected = authenticated;
+
+        authenticated = false;
+        socket = null;
+        pressedKeys.clear();
+
+        statusEl.textContent = wasConnected
+            ? "Disconnected"
+            : "Could not connect (wrong password, server busy, origin " +
+              "not allowed, or untrusted certificate)";
+    };
+}
+
+function disconnect() {
+
+    authenticated = false;
+    pressedKeys.clear();
+
+    const old = socket;
+    socket = null;
+
+    if (old) {
+        old.close();
+    }
+
+    statusEl.textContent = "Disconnected";
+}
+
+// ======================================
+// SEND DATA
+// ======================================
+
+function send(data) {
+
+    if (
+        socket &&
+        socket.readyState === WebSocket.OPEN &&
+        authenticated
+    ) {
+        socket.send(JSON.stringify(data));
+    }
+}
+
+// ======================================
+// MOUSE POSITION
+// ======================================
+
+// Returns the position as fractions (0..1) of the remote screen.
+// Accounts for the letterbox bars that object-fit: contain adds.
+function getPosition(event) {
+
+    if (!canvas.width || !canvas.height) return null;
+
+    const rect = canvas.getBoundingClientRect();
+
+    const scale = Math.min(
+        rect.width / canvas.width,
+        rect.height / canvas.height
+    );
+
+    const shownW = canvas.width * scale;
+    const shownH = canvas.height * scale;
+
+    const left = rect.left + (rect.width - shownW) / 2;
+    const top = rect.top + (rect.height - shownH) / 2;
+
+    const clamp = v => Math.max(0, Math.min(1, v));
+
+    return {
+        nx: clamp((event.clientX - left) / shownW),
+        ny: clamp((event.clientY - top) / shownH)
+    };
+}
+
+// ======================================
+// POINTER (mouse + touch)
+// ======================================
+
+let pendingMove = null;
+let moveScheduled = false;
+
+function flushMove() {
+
+    moveScheduled = false;
+
+    if (!pendingMove) return;
+
+    const pos = getPosition(pendingMove);
+    pendingMove = null;
+
+    if (pos) {
+        send({ action: "move", nx: pos.nx, ny: pos.ny });
+    }
+}
+
+function queueMove(event) {
+
+    pendingMove = event;
+
+    // At most one move message per animation frame.
+    if (!moveScheduled) {
+        moveScheduled = true;
+        requestAnimationFrame(flushMove);
+    }
+}
+
+const BUTTONS = ["left", "middle", "right"];
+
+canvas.addEventListener("pointermove", event => {
+
+    if (!event.isPrimary) return;
+
+    queueMove(event);
+});
+
+canvas.addEventListener("pointerdown", event => {
+
+    if (!event.isPrimary) return;
+
+    event.preventDefault();
+
+    const button = BUTTONS[event.button];
+    if (!button) return;
+
+    canvas.focus();
+    canvas.setPointerCapture(event.pointerId);
+
+    // Touch has no hover, so move to the touch point first.
+    const pos = getPosition(event);
+
+    if (pos) {
+        send({ action: "move", nx: pos.nx, ny: pos.ny });
+    }
+
+    send({ action: "mousedown", button: button });
+});
+
+function pointerRelease(event) {
+
+    if (!event.isPrimary) return;
+
+    const button = BUTTONS[event.button] || "left";
+
+    flushMove();
+    send({ action: "mouseup", button: button });
+}
+
+canvas.addEventListener("pointerup", pointerRelease);
+canvas.addEventListener("pointercancel", pointerRelease);
+
+// Suppress the browser's right-click menu on the canvas.
+canvas.addEventListener("contextmenu", event => event.preventDefault());
+
+// ======================================
+// SCROLLING
+// ======================================
+
+canvas.addEventListener("wheel", event => {
+
+    event.preventDefault();
+
+    const amount = Math.max(
+        -10,
+        Math.min(
+            10,
+            -Math.sign(event.deltaY) *
+            Math.ceil(Math.abs(event.deltaY) / 100)
+        )
+    );
+
+    if (amount === 0) return;
+
+    send({ action: "scroll", amount: amount });
+
+}, { passive: false });
+
+// ======================================
+// KEYBOARD
+// ======================================
+
+// Uses event.code (the physical key), so Shift+1 sends Shift and 1 rather
+// than "!" on top of Shift. The remote machine applies its own layout.
+const CODE_MAP = {
+    Space: "space",
+    Enter: "enter",
+    NumpadEnter: "enter",
+    Escape: "esc",
+    Backspace: "backspace",
+    Tab: "tab",
+
+    ShiftLeft: "shiftleft",
+    ShiftRight: "shiftright",
+    ControlLeft: "ctrlleft",
+    ControlRight: "ctrlright",
+    AltLeft: "altleft",
+    AltRight: "altright",
+    MetaLeft: "winleft",
+    MetaRight: "winright",
+    CapsLock: "capslock",
+
+    Delete: "delete",
+    Insert: "insert",
+    Home: "home",
+    End: "end",
+    PageUp: "pageup",
+    PageDown: "pagedown",
+
+    ArrowUp: "up",
+    ArrowDown: "down",
+    ArrowLeft: "left",
+    ArrowRight: "right",
+
+    Minus: "-",
+    Equal: "=",
+    BracketLeft: "[",
+    BracketRight: "]",
+    Backslash: "\\",
+    Semicolon: ";",
+    Quote: "'",
+    Backquote: "`",
+    Comma: ",",
+    Period: ".",
+    Slash: "/"
+};
+
+function translateCode(code) {
+
+    if (CODE_MAP[code]) return CODE_MAP[code];
+
+    let m;
+
+    if ((m = /^Key([A-Z])$/.exec(code))) return m[1].toLowerCase();
+    if ((m = /^Digit([0-9])$/.exec(code))) return m[1];
+    if ((m = /^Numpad([0-9])$/.exec(code))) return "num" + m[1];
+    if ((m = /^F([0-9]{1,2})$/.exec(code))) return "f" + m[1];
+
+    return null;
+}
+
+const pressedKeys = new Set();
+
+canvas.addEventListener("keydown", event => {
+
+    event.preventDefault();
+
+    if (event.repeat) return;
+
+    const key = translateCode(event.code);
+    if (!key) return;
+
+    pressedKeys.add(key);
+    send({ action: "keydown", key: key });
+});
+
+canvas.addEventListener("keyup", event => {
+
+    event.preventDefault();
+
+    const key = translateCode(event.code);
+    if (!key) return;
+
+    pressedKeys.delete(key);
+    send({ action: "keyup", key: key });
+});
+
+// ======================================
+// FOCUS HANDLING
+// ======================================
+
+// When the page loses focus (alt-tab, Win key, devtools...) keep the
+// connection but release everything that is held on the remote side.
+function releaseEverything() {
+
+    pressedKeys.clear();
+    send({ action: "releaseall" });
+}
+
+window.addEventListener("blur", releaseEverything);
+
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) releaseEverything();
+});
+
+// ======================================
+// UI
+// ======================================
+
+document.getElementById("connectBtn").addEventListener("click", connect);
+document.getElementById("disconnectBtn").addEventListener("click", disconnect);
+
+document.getElementById("password").addEventListener("keydown", event => {
+    if (event.key === "Enter") connect();
+});
+
+// Fullscreen lets Chromium-based browsers capture shortcuts such as
+// Ctrl+W / Alt+Tab-style keys via the Keyboard Lock API. Some browser
+// shortcuts can never be captured.
+document.getElementById("fullscreenBtn").addEventListener("click", async () => {
+
+    try {
+        await canvas.requestFullscreen();
+
+        if (navigator.keyboard && navigator.keyboard.lock) {
+            await navigator.keyboard.lock();
+        }
+
+        canvas.focus();
+
+    } catch (error) {
+        console.error("Fullscreen failed:", error);
+    }
+});
+
+</script>
+
+</body>
+</html>

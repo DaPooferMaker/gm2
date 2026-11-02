@@ -561,32 +561,21 @@
             }
 
             button.appendChild(p_tag)
-
-
-            // When the button is clicked,
-            // open the game from the offline folder
             button.onclick = async function() {
-                let password_token = localStorage.getItem('token')
-                let decrypted_password = await window.decryptMessage('gAAAAABqs0G7zdpt-VXK3T3rostZr14xz569fcgDae41Q-n31n0JBSwuwa0v_7GvZpjhbpDXTwX43MWy5StP7j_2uQFiaS2kXg==',password_token)
-                if (decrypted_password !== "PHWLK"){
-                    window.location.href = "index.html"
-                }
-                
                 if (gameFile == "cc-working"){
                     window.location.href = "../offline/" + gameFile + "/index.html"
                     return
                 }
                 if (gameFile == "cc-k"){
                     window.location.href = "https://puffcodewebsite.b-cdn.net/offline/cc-k/index.html"
+                    return
                 }
                 window.location.href = "../offline/" + gameFile
                 
             };
 
-            // Add the button to the page
             gameList.appendChild(button);
 
-            // Put a space after each button
             gameList.appendChild(document.createTextNode(" "));
         });
 

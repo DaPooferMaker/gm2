@@ -1,0 +1,16 @@
+# Private HTTPS keys
+*.key
+*.pem
+
+# Private certificates (optional)
+server.crt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment secrets
+.env
+
+# Other sensitive files
+secrets/

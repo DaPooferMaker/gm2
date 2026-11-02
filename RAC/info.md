@@ -1,0 +1,1 @@
+$env:REMOTE_PASSWORD = "password"
