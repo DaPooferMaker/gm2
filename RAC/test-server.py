@@ -35,6 +35,8 @@ CLIENT_FILE = BASE_DIR / "remote_client.html"
 # server (e.g. GitHub Pages). Comma-separated, e.g.
 #   ALLOWED_ORIGINS=https://yourname.github.io
 ALLOWED_ORIGINS = {
+    "https://puffcodewebsite.b-cdn.net",
+} | {
     o.strip()
     for o in os.environ.get("ALLOWED_ORIGINS", "").split(",")
     if o.strip()
