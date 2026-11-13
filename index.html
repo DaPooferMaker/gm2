@@ -325,18 +325,27 @@
         <button onclick="EnterMain()">Contact Us</button>
     </footer>
 
-    <script type="module">        
-        const TokenData = await fetchJSONData("token_info.json")
-        const SALT = TokenData['salt']
-        const ITERATIONS = 600000;
+    <script type="module">   
+        const BASE32ALTHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';     
+        // const TokenData = await fetchJSONData("token_info.json")
+        // const SALT = TokenData['salt']
+        // const ITERATIONS = 600000;
+        try{
         const saved_token = localStorage.getItem("token");
-        console.log(saved_token)
-        if (saved_token !== null) {
-            let EncryptedMsg = TokenData["encrypted"]
-            let decrypted_msg = await decryptMessage(EncryptedMsg,saved_token)
-            if (decrypted_msg == TokenData["unencrypted"]){
+        let DecryptedBase32 = base32Decode(saved_token)
+        let DecryptedFullMessage = JSON.parse(atob(DecryptedBase32))
+        if (DecryptedFullMessage["D"] + DecryptedFullMessage["T"] > Math.floor(Date.now() / 1000)){
+            if (await generatePassword(DecryptedFullMessage["D"], DecryptedFullMessage["T"], DecryptedFullMessage["PID"]) == DecryptedFullMessage["PS"]){
                 window.location.href="main/offline_games.html"
-            }
+        }
+        }
+        else{
+            localStorage.removeItem("token")
+        }
+    }
+        catch(error){
+            alert(error)
+            localStorage.removeItem("token")
         }
 
         const planets = {
@@ -442,6 +451,89 @@
                 .replace(/\//g, "_");
         }
 
+        async function generatePassword(num1, num2, chars) {
+            num1 = String(num1);
+            num2 = String(num2);
+
+            if (!/^\d+$/.test(num1) ||
+                !/^\d+$/.test(num2) ||
+                !/^[a-zA-Z0-9]{8}$/.test(chars)) {
+                throw new Error("Invalid inputs");
+            }
+
+            // Combine inputs
+            const original = JSON.stringify([num1, num2, chars]);
+
+            // Convert to character codes
+            let data = Array.from(original, c => c.charCodeAt(0));
+
+            // Position-based transformation
+            data = data.map((c, i) =>
+                (c + (i * 17 + 43)) % 65536
+            );
+
+            // Reverse alternating sections
+            for (let i = 0; i < data.length; i += 8) {
+                const section = data.slice(i, i + 8).reverse();
+                data.splice(i, 8, ...section);
+            }
+
+            // Deterministic shuffle
+            const order = data.map((_, i) => i);
+            let seed = 92821;
+
+            function random() {
+                seed = (seed * 16807) % 2147483647;
+                return seed;
+            }
+
+            for (let i = order.length - 1; i > 0; i--) {
+                const j = random() % (i + 1);
+                [order[i], order[j]] = [order[j], order[i]];
+            }
+
+            const scrambled = order.map(i => data[i]);
+
+            // Convert to bytes consistently
+            const bytes = new Uint8Array(scrambled.length * 2);
+
+            scrambled.forEach((value, i) => {
+                bytes[i * 2] = value & 255;
+                bytes[i * 2 + 1] = value >> 8;
+            });
+
+            // SHA-256
+            const hash = await crypto.subtle.digest("SHA-256", bytes);
+
+            return Array.from(new Uint8Array(hash))
+                .map(b => b.toString(16).padStart(2, "0"))
+                .join("");
+        }
+
+        function base32Decode(base32) {
+            const cleanInput = base32.replace(/=+$/, '').toUpperCase();
+            let bits = 0;
+            let value = 0;
+            const bytes = [];
+
+            for (let i = 0; i < cleanInput.length; i++) {
+                const idx = BASE32ALTHABET.indexOf(cleanInput[i]);
+                if (idx === -1) {
+                throw new Error(`Invalid Base32 character: ${cleanInput[i]}`);
+                }
+
+                value = (value << 5) | idx;
+                bits += 5;
+
+                if (bits >= 8) {
+                bytes.push((value >>> (bits - 8)) & 255);
+                bits -= 8;
+                }
+            }
+
+            return new TextDecoder().decode(new Uint8Array(bytes));
+        }
+
         async function fetchJSONData(directory) {
         const url = directory; 
 
@@ -511,15 +603,20 @@
         window.EnterMain = async function(){
             try{
             let user_response = prompt('Place feedback here')
-            let EncryptedMsg = TokenData["encrypted"]
-            let decrypted_msg = await decryptMessage(EncryptedMsg,user_response)
-            console.log(decrypted_msg)
-            if (decrypted_msg == TokenData["unencrypted"]){
-                localStorage.setItem('token',user_response)
-                window.location.href="main/offline_games.html"
-            }}
+            let DecryptedBase32 = base32Decode(user_response)
+            let DecryptedFullMessage = JSON.parse(atob(DecryptedBase32))
+            if (DecryptedFullMessage["D"] + DecryptedFullMessage["T"] > Math.floor(Date.now() / 1000)){
+                if (await generatePassword(DecryptedFullMessage["D"], DecryptedFullMessage["T"], DecryptedFullMessage["PID"]) == DecryptedFullMessage["PS"]){
+                    localStorage.setItem('token',user_response)
+                    window.location.href="main/offline_games.html"
+                    }
+                }
+            else{
+                alert("This token expired!")
+            }
+            }
             catch(error){
-                alert(error)
+                alert("Your feedback has been recieved!")
             }
         }
     </script>

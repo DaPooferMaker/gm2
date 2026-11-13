@@ -118,85 +118,161 @@
     </script>
 
     <script type="module">
-        const TokenData = await fetchJSONData("../token_info.json")
-        console.log(TokenData)
+        async function generatePassword(num1, num2, chars) {
+            num1 = String(num1);
+            num2 = String(num2);
 
-        const SALT = TokenData['salt'];
-        let encryptedMsg = TokenData["encrypted"];
-        const DecryptedMessage = TokenData["unencrypted"]
-        const ITERATIONS = 600000;
+            if (!/^\d+$/.test(num1) ||
+                !/^\d+$/.test(num2) ||
+                !/^[a-zA-Z0-9]{8}$/.test(chars)) {
+                throw new Error("Invalid inputs");
+            }
 
+            // Combine inputs
+            const original = JSON.stringify([num1, num2, chars]);
 
-        async function deriveFernetKey(password) {
-            const encoder = new TextEncoder();
+            // Convert to character codes
+            let data = Array.from(original, c => c.charCodeAt(0));
 
-            const importedKey = await crypto.subtle.importKey(
-                "raw",
-                encoder.encode(password),
-                "PBKDF2",
-                false,
-                ["deriveBits"]
+            // Position-based transformation
+            data = data.map((c, i) =>
+                (c + (i * 17 + 43)) % 65536
             );
 
-            const derivedBits = await crypto.subtle.deriveBits(
-                {
-                    name: "PBKDF2",
-                    salt: encoder.encode(SALT),
-                    iterations: ITERATIONS,
-                    hash: "SHA-256"
-                },
-                importedKey,
-                256
-            );
-
-            const bytes = new Uint8Array(derivedBits);
-
-            let binary = "";
-
-            for (let i = 0; i < bytes.length; i++) {
-                binary += String.fromCharCode(bytes[i]);
+            // Reverse alternating sections
+            for (let i = 0; i < data.length; i += 8) {
+                const section = data.slice(i, i + 8).reverse();
+                data.splice(i, 8, ...section);
             }
 
-            return btoa(binary)
-                .replace(/\+/g, "-")
-                .replace(/\//g, "_");
+            // Deterministic shuffle
+            const order = data.map((_, i) => i);
+            let seed = 92821;
+
+            function random() {
+                seed = (seed * 16807) % 2147483647;
+                return seed;
+            }
+
+            for (let i = order.length - 1; i > 0; i--) {
+                const j = random() % (i + 1);
+                [order[i], order[j]] = [order[j], order[i]];
+            }
+
+            const scrambled = order.map(i => data[i]);
+
+            // Convert to bytes consistently
+            const bytes = new Uint8Array(scrambled.length * 2);
+
+            scrambled.forEach((value, i) => {
+                bytes[i * 2] = value & 255;
+                bytes[i * 2 + 1] = value >> 8;
+            });
+
+            // SHA-256
+            const hash = await crypto.subtle.digest("SHA-256", bytes);
+
+            return Array.from(new Uint8Array(hash))
+                .map(b => b.toString(16).padStart(2, "0"))
+                .join("");
         }
 
-        async function decryptMessage(encryptedMsg, password) {
-            try {
-                const key = await deriveFernetKey(password);
+        function base32Decode(base32) {
+            const cleanInput = base32.replace(/=+$/, '').toUpperCase();
+            let bits = 0;
+            let value = 0;
+            const bytes = [];
 
-                const secret = new fernet.Secret(key);
+            for (let i = 0; i < cleanInput.length; i++) {
+                const idx = BASE32ALTHABET.indexOf(cleanInput[i]);
+                if (idx === -1) {
+                throw new Error(`Invalid Base32 character: ${cleanInput[i]}`);
+                }
 
-                const token = new fernet.Token({
-                    secret: secret,
-                    token: encryptedMsg,
-                    ttl: 0
-                });
+                value = (value << 5) | idx;
+                bits += 5;
 
-                return token.decode();
-
-            } catch (error) {
-                return null;
+                if (bits >= 8) {
+                bytes.push((value >>> (bits - 8)) & 255);
+                bits -= 8;
+                }
             }
+
+            return new TextDecoder().decode(new Uint8Array(bytes));
         }
 
-        window.decryptMessage = decryptMessage;
+        // async function deriveFernetKey(password) {
+        //     const encoder = new TextEncoder();
 
-        let savedToken = localStorage.getItem("token");
+        //     const importedKey = await crypto.subtle.importKey(
+        //         "raw",
+        //         encoder.encode(password),
+        //         "PBKDF2",
+        //         false,
+        //         ["deriveBits"]
+        //     );
 
-        if (savedToken !== null) {
-            console.log("redirecting...")
-            let decrypted_msg = await decryptMessage(encryptedMsg, savedToken);
+        //     const derivedBits = await crypto.subtle.deriveBits(
+        //         {
+        //             name: "PBKDF2",
+        //             salt: encoder.encode(SALT),
+        //             iterations: ITERATIONS,
+        //             hash: "SHA-256"
+        //         },
+        //         importedKey,
+        //         256
+        //     );
 
-            if (decrypted_msg !== DecryptedMessage) {
-                window.location.href = "../index.html";
+        //     const bytes = new Uint8Array(derivedBits);
 
-            }
-            else{
-                document.body.style.display = "block"
-            }
+        //     let binary = "";
+
+        //     for (let i = 0; i < bytes.length; i++) {
+        //         binary += String.fromCharCode(bytes[i]);
+        //     }
+
+        //     return btoa(binary)
+        //         .replace(/\+/g, "-")
+        //         .replace(/\//g, "_");
+        // }
+
+        // async function decryptMessage(encryptedMsg, password) {
+        //     try {
+        //         const key = await deriveFernetKey(password);
+
+        //         const secret = new fernet.Secret(key);
+
+        //         const token = new fernet.Token({
+        //             secret: secret,
+        //             token: encryptedMsg,
+        //             ttl: 0
+        //         });
+
+        //         return token.decode();
+
+        //     } catch (error) {
+        //         return null;
+        //     }
+        // }
+        const BASE32ALTHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';     
+
+        try{
+        const saved_token = localStorage.getItem("token");
+        let DecryptedBase32 = base32Decode(saved_token)
+        let DecryptedFullMessage = JSON.parse(atob(DecryptedBase32))
+        console.log(DecryptedFullMessage)
+        if (DecryptedFullMessage["D"] + DecryptedFullMessage["T"] < Math.floor(Date.now() / 1000)){
+            window.location.href = "../index.html"
+            
         }
+        if (await generatePassword(DecryptedFullMessage["D"], DecryptedFullMessage["T"], DecryptedFullMessage["PID"]) !== DecryptedFullMessage["PS"]){
+            window.location.href = "../index.html"
+        }
+        }
+        catch(error){
+            alert(error)
+        }
+        document.body.style.display = "block"
 
     </script>
 
@@ -300,6 +376,28 @@
         function LoadStash() {
             window.location.href = "game_stash.html";
         }
+    </script>
+    <!-- Tab Distiguisherer How do I SPEL??? -->
+    <script type="module">
+        async function loadExternalScript(filePath, functionName, ...parameters) {
+            try {
+            // 1. Import directly using the single path string
+            const module = await import(filePath);
+            
+            // 2. Execute the function
+            if (typeof module[functionName] === 'function') {
+                module[functionName](...parameters);
+            } else {
+                console.error(`Function "${functionName}" not found in module.`);
+            }
+            } catch (err) {
+            console.error('Failed to load or execute:', err);
+            }
+        }
+
+        // Example Usage:
+        // Just pass the relative path and the function name
+        await loadExternalScript('../site-tools/site-tools.js', 'RandomizeTitle', "../img/website-dg/");
     </script>
 
 </body>
