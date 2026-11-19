@@ -338,12 +338,20 @@
                     window.location.href = "../RAC/remote_client.html"
                     return
                 }
-                if (gameFile == "new-offline-test"){
-                    const text = await (await fetch('../tools/new-offline-test.txt')).text();
-                    document.open()
-                    document.write(text)
-                    document.close()
-                    return
+                if (gameFile === "new-offline-test") {
+                    const response = await fetch("../tools/new-offline-test.html");
+                    if (!response.ok) {
+                        console.error(`Could not load New Offline Test (${response.status})`);
+                        return;
+                    }
+
+                    const frame = document.createElement("iframe");
+                    frame.title = "New Offline Test";
+                    frame.style.cssText =
+                        "position:fixed;inset:0;width:100%;height:100%;border:0";
+                    frame.srcdoc = await response.text();
+                    document.body.replaceChildren(frame);
+                    return;
                 }
                 window.location.href = "../tools/" + gameFile
                 
