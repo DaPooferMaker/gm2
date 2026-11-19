@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <style>
+        body {
+            display:none;
+            margin:0px;
+            background-color:#0a0a0a;
+            overflow-x:hidden;
+        }
+
+        #ParentDiv{
+            display:flex;
+            justify-content:start;
+            align-items:center;
+            flex-direction:column;
+            left:0;
+            top:0;
+            width:100%;
+            background-color:#020407;
+            
+        }
+
+        .OfflineGameButton-text{
+            font-size:20cqmin;
+            color:#f7f7f7;
+            text-shadow:#f7f7f7;
+        }
+
+        .GameButtonContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            width: 100%;
+            aspect-ratio: 1 / 1.2;
+            background-color: #000208;
+            border: 1px solid #281e53;
+            border-radius: 1px;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+
+        .GameButtonContainer-img {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            object-fit: cover;
+            display: block;
+            background-color: #000a13;
+            border: none;
+            outline: none;
+        }
+
+        .GameButtonContainer-divtext {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            flex: 1;
+            text-align: center;
+            min-height: 0;
+            background-color: #000924;
+        }
+
+        .GameButtonContainer-text {
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            color: #FFFFFF;
+            text-shadow: none;
+            margin: 0;
+            padding: 5px;
+            text-align: center;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        #GameList {
+            width: 100%;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 20px;
+            padding: 0 5px;
+            box-sizing: border-box;
+        }
+
+        #TopNav {
+            width: 100%;
+            height: 10%;
+            flex-shrink: 0; /* Prevents #GameList from squeezing the navbar */
+            display: flex;
+            left: 0px;
+            top: 0px;
+            background-color: #4B0082;
+            align-items: center;
+        }
+
+        .TopNav-button {
+        flex: 1;
+        width: fit-content;
+        height: calc(100% - 10px);
+        margin: 5px;
+        background-color: #8a2be2;
+        border-color: #8a2be2;
+        text-size-adjust: inherit;
+        
+        font-size: calc(5vh - 14px); 
+        
+        font-family: Georgia, 'Times New Roman', Times, serif;
+        }
+
+        .TopNav-button:hover {
+            opacity:80%;
+        }
+    </style>
+
+<script src="../assets/fernet.txt"></script>
+
+    <!-- Utilities -->
+    <script>
+    async function fetchJSONData(directory) {
+        const url = directory; // Replace with your local path or remote URL
+
+        try {
+            const response = await fetch(url);
+            
+            // Check if the request was successful
+            if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            
+            // Parse the response body as JSON
+            const data = await response.json();
+            console.log(data); // Work with your data here
+            return data
+            
+        } catch (error) {
+            console.error('Failed to fetch JSON:', error);
+        }
+        }
+    </script>
+
+    <!-- Decryption -->
+
+    <script type="module">
+        async function generatePassword(num1, num2, chars) {
+            num1 = String(num1);
+            num2 = String(num2);
+
+            if (!/^\d+$/.test(num1) ||
+                !/^\d+$/.test(num2) ||
+                !/^[a-zA-Z0-9]{8}$/.test(chars)) {
+                throw new Error("Invalid inputs");
+            }
+
+            // Combine inputs
+            const original = JSON.stringify([num1, num2, chars]);
+
+            // Convert to character codes
+            let data = Array.from(original, c => c.charCodeAt(0));
+
+            // Position-based transformation
+            data = data.map((c, i) =>
+                (c + (i * 17 + 43)) % 65536
+            );
+
+            // Reverse alternating sections
+            for (let i = 0; i < data.length; i += 8) {
+                const section = data.slice(i, i + 8).reverse();
+                data.splice(i, 8, ...section);
+            }
+
+            // Deterministic shuffle
+            const order = data.map((_, i) => i);
+            let seed = 92821;
+
+            function random() {
+                seed = (seed * 16807) % 2147483647;
+                return seed;
+            }
+
+            for (let i = order.length - 1; i > 0; i--) {
+                const j = random() % (i + 1);
+                [order[i], order[j]] = [order[j], order[i]];
+            }
+
+            const scrambled = order.map(i => data[i]);
+
+            // Convert to bytes consistently
+            const bytes = new Uint8Array(scrambled.length * 2);
+
+            scrambled.forEach((value, i) => {
+                bytes[i * 2] = value & 255;
+                bytes[i * 2 + 1] = value >> 8;
+            });
+
+            // SHA-256
+            const hash = await crypto.subtle.digest("SHA-256", bytes);
+
+            return Array.from(new Uint8Array(hash))
+                .map(b => b.toString(16).padStart(2, "0"))
+                .join("");
+        }
+
+        function base32Decode(base32) {
+            const cleanInput = base32.replace(/=+$/, '').toUpperCase();
+            let bits = 0;
+            let value = 0;
+            const bytes = [];
+
+            for (let i = 0; i < cleanInput.length; i++) {
+                const idx = BASE32ALTHABET.indexOf(cleanInput[i]);
+                if (idx === -1) {
+                throw new Error(`Invalid Base32 character: ${cleanInput[i]}`);
+                }
+
+                value = (value << 5) | idx;
+                bits += 5;
+
+                if (bits >= 8) {
+                bytes.push((value >>> (bits - 8)) & 255);
+                bits -= 8;
+                }
+            }
+
+            return new TextDecoder().decode(new Uint8Array(bytes));
+        }
+
+        // async function deriveFernetKey(password) {
+        //     const encoder = new TextEncoder();
+
+        //     const importedKey = await crypto.subtle.importKey(
+        //         "raw",
+        //         encoder.encode(password),
+        //         "PBKDF2",
+        //         false,
+        //         ["deriveBits"]
+        //     );
+
+        //     const derivedBits = await crypto.subtle.deriveBits(
+        //         {
+        //             name: "PBKDF2",
+        //             salt: encoder.encode(SALT),
+        //             iterations: ITERATIONS,
+        //             hash: "SHA-256"
+        //         },
+        //         importedKey,
+        //         256
+        //     );
+
+        //     const bytes = new Uint8Array(derivedBits);
+
+        //     let binary = "";
+
+        //     for (let i = 0; i < bytes.length; i++) {
+        //         binary += String.fromCharCode(bytes[i]);
+        //     }
+
+        //     return btoa(binary)
+        //         .replace(/\+/g, "-")
+        //         .replace(/\//g, "_");
+        // }
+
+        // async function decryptMessage(encryptedMsg, password) {
+        //     try {
+        //         const key = await deriveFernetKey(password);
+
+        //         const secret = new fernet.Secret(key);
+
+        //         const token = new fernet.Token({
+        //             secret: secret,
+        //             token: encryptedMsg,
+        //             ttl: 0
+        //         });
+
+        //         return token.decode();
+
+        //     } catch (error) {
+        //         return null;
+        //     }
+        // }
+        const BASE32ALTHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';     
+
+        try{
+        const saved_token = localStorage.getItem("token");
+        let DecryptedBase32 = base32Decode(saved_token)
+        let DecryptedFullMessage = JSON.parse(atob(DecryptedBase32))
+        console.log(DecryptedFullMessage)
+        if (DecryptedFullMessage["D"] + DecryptedFullMessage["T"] < Math.floor(Date.now() / 1000)){
+            window.location.href = "../index.html"
+            
+        }
+        if (await generatePassword(DecryptedFullMessage["D"], DecryptedFullMessage["T"], DecryptedFullMessage["PID"]) !== DecryptedFullMessage["PS"]){
+            window.location.href = "../index.html"
+        }
+        }
+        catch(error){
+            window.location.href = "../index.html"
+        }
+        document.body.style.display = "block"
+
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Games</title>
+
+</head>
+<body>
+    <div id="ParentDiv">
+    <div id="TopNav">
+        <button class="TopNav-button" onclick="window.location.href='1.html';"> Offline Games </button>
+        <button class="TopNav-button" onclick="window.location.href='offline_games-src2.html';"> Offline Games Source 2 </button>
+        <button class="TopNav-button" onclick="window.location.href='tools.html';"> Tools </button>
+    </div>
+
+    <h1 style="color:#f7f7f7;"> Offline games! </h1>
+
+    <div id="GameList">
+
+    </div>
+    </div>
+
+    <script>
+
+        const g = [
+    "1-on-1-soccer.html",
+    "1-on-1-tennis.html",
+    "1.12.html",
+    "1.5.html",
+    "1.8.html",
+    "10-minutes-till-dawn.html",
+    "12-mini-battles.html",
+    "1v1.lol.html",
+    "2048-cupcakes.html",
+    "2048.html",
+    "3D-flight-simulator.html",
+    "8-ball-classic.html",
+    "Alpha_1.2.6.html",
+    "Beta_1.3.html",
+    "Indev.html",
+    "agar-io-lite.html",
+    "age-of-war-2.html",
+    "age-of-war.html",
+    "ages-of-conflict.html",
+    "among-us.html",
+    "angry-birds-showdown.html",
+    "angry-birds-space.html",
+    "angry-birds.html",
+    "awesome-tanks-2.html",
+    "awesome-tanks.html",
+    "backrooms.html",
+    "bacon-may-die.html",
+    "bad-ice-cream-2.html",
+    "bad-ice-cream-3.html",
+    "bad-ice-cream.html",
+    "bad-parenting.html",
+    "bad-piggies.html",
+    "baldis-basics.html",
+    "baseball-bros.html",
+    "basket-bros.html",
+    "basket-random.html",
+    "basketball-legends.html",
+    "basketball-stars.html",
+    "bit-planes.html",
+    "bitlife.html",
+    "blocky-snakes.html",
+    "bloons-TD-2.html",
+    "bloons-TD-3.html",
+    "bloons-TD-4.html",
+    "bloons-TD-5.html",
+    "bloons-TD.html",
+    "bloxorz.html",
+    "blumgi-racers.html",
+    "blumgi-rocket.html",
+    "bob-the-robber-2.html",
+    "bob-the-robber-5.html",
+    "bob-the-robber.html",
+    "bouncy-motors.html",
+    "bow-masters.html",
+    "boxing-random.htm",
+    "breaking-the-bank.html",
+    "bubble-shooter.html",
+    "candy-crush.html",
+    "capybara-clicker.html",
+    "car-drawing.html",
+    "car-king-arena.html",
+    "chess.html",
+    "choppy-orc.html",
+    "circloO-2.html",
+    "circloO.html",
+    "clash-of-vikings.html",
+    "cleanup-io.html",
+    "cluster-rush.html",
+    "cc-working",
+    "crazy-cars.html",
+    "crazy-cattle-3D.html",
+    "crazy-crash-landing.html",
+    "crazy-motorcycle.html",
+    "crossy-road.htm",
+    "cut-the-rope.html",
+    "dadish-2.html",
+    "dadish-3.html",
+    "dadish.html",
+    "death-chase.html",
+    "death-run-3D.html",
+    "demolition-derby-crash-racing.html",
+    "doodle-jump.html",
+    "draw-climber.html",
+    "dreadhead-parkour.htm",
+    "drift-boss.htm",
+    "drive-mad.htm",
+    "duck-life-2.html",
+    "duck-life-3.html",
+    "duck-life-4.html",
+    "duck-life-5.html",
+    "duck-life.html",
+    "ducklings-io.html",
+    "eagle-ride.html",
+    "earn-to-die-2.html",
+    "earn-to-die.html",
+    "eggy-car.html",
+    "elastic-face.htm",
+    "escape-road-2.html",
+    "escape-road.html",
+    "escaping-the-prison.html",
+    "evil-glitch.html",
+    "fancy-pants-adventure-2.html",
+    "fancy-pants-adventure.html",
+    "fireboy-and-watergirl-2.html",
+    "fireboy-and-watergirl-3.html",
+    "fireboy-and-watergirl-4.html",
+    "fireboy-and-watergirl.html",
+    "flappy-bird.html",
+    "flood-runner-2.html",
+    "flood-runner-3.html",
+    "flood-runner-4.html",
+    "fnaf-2.html",
+    "fnaf-3.html",
+    "fnaf-4.html",
+    "fnaf.html",
+    "football-bros.html",
+    "football-legends.html",
+    "free-rider-3.html",
+    "fruit-ninja.html",
+    "funny-battle-2.html",
+    "funny-battle.html",
+    "funny-mad-racing.html",
+    "funny-shooter-2.html",
+    "geometry-dash-lite.html",
+    "geometry-dash.html",
+    "geometry-vibes.html",
+    "get-on-top.html",
+    "getaway-shootout.htm",
+    "gladi-hoppers.html",
+    "google-baseball.html",
+    "google-dino.html",
+    "granny-2.html",
+    "granny.html",
+    "guess-their-answer.html",
+    "hanger-2.html",
+    "happy-wheels.html",
+    "helix-jump.html",
+    "highway-traffic.html",
+    "hill-climb-racing-lite.html",
+    "hole-io.html",
+    "house-of-hazards.html",
+    "hover-racer-drive.html",
+    "idle-breakout.html",
+    "iron-snout.html",
+    "jetpack-joyride.html",
+    "johnny-trigger.html",
+    "jumping-shell.html",
+    "karate-bros.html",
+    "kart-bros.html",
+    "learn-to-fly-2.html",
+    "learn-to-fly-3.html",
+    "learn-to-fly-idle.html",
+    "learn-to-fly.html",
+    "level-devil.html",
+    "madalin-stunt-cars-2.html",
+    "melon-playground.html",
+    "merge-round-racers.html",
+    "minesweeper.html",
+    "monkey-mart.htm",
+    "monster-tracks.html",
+    "moto-x3m-2.html",
+    "moto-x3m-3.html",
+    "moto-x3m-pool-party.html",
+    "moto-x3m-spooky-land.html",
+    "moto-x3m-winter.html",
+    "moto-x3m.htm",
+    "noob-miner.html",
+    "opposite-day.html",
+    "ovo-2.html",
+    "ovo-3-dimensions.html",
+    "ovo.html",
+    "pac-man.html",
+    "papas-bakeria.html",
+    "papas-burgeria.html",
+    "papas-cheeseria.html",
+    "papas-cupcakeria.html",
+    "papas-donuteria.html",
+    "papas-freezeria.html",
+    "papas-hot-doggeria.html",
+    "papas-pancakeria.html",
+    "papas-pastaria.html",
+    "papas-pizzeria.html",
+    "papas-scooperia.html",
+    "papas-sushiria.html",
+    "papas-taco-mia.html",
+    "papas-wingeria.html",
+    "paper-io-2.htm",
+    "parking-fury-2.html",
+    "parking-fury-3.html",
+    "parking-fury.html",
+    "picos-school.html",
+    "ping-pong-chaos.html",
+    "pixel-speedrun.html",
+    "plants-vs-zombies.html",
+    "plonky.html",
+    "polytrack.html",
+    "poor-bunny.html",
+    "pou.html",
+    "ragdoll-archers.htm",
+    "ragdoll-hit.html",
+    "ragdoll-soccer.html",
+    "red-ball-4-vol-1.html",
+    "red-ball-4-vol-2.html",
+    "red-ball-4-vol-3.html",
+    "retro-bowl-college.html",
+    "retro-bowl.html",
+    "retro-highway.html",
+    "retro-ping-pong.html",
+    "riddle-school-2.html",
+    "riddle-school-3.html",
+    "riddle-school-4.html",
+    "riddle-school-5.html",
+    "riddle-school.html",
+    "riddle-transfer-2.html",
+    "riddle-transfer.html",
+    "rocket-soccer-derby.html",
+    "rooftop-snipers-2.html",
+    "rooftop-snipers.htm",
+    "run-2.html",
+    "run-3.html",
+    "run.html",
+    "sand-game.html",
+    "short-life.html",
+    "slope-2-player.html",
+    "slope-3.html",
+    "slope.html",
+    "slow-roads.html",
+    "sm-63.html",
+    "sm-64.html",
+    "snow-rider.htm",
+    "snow-road.htm",
+    "snowball-io.html",
+    "soccer-bros.html",
+    "soccer-random.htm",
+    "space-is-key-2.html",
+    "space-is-key.html",
+    "space-waves.html",
+    "spacebar-clicker.html",
+    "speed-stars.html",
+    "sprunki.html",
+    "stack.html",
+    "stacktris.html",
+    "state-io.html",
+    "stick-archers-battle.html",
+    "stick-fighter.html",
+    "stick-merge.html",
+    "stickman-hook.html",
+    "subway-surfers-beijing.html",
+    "subway-surfers-havana.html",
+    "subway-surfers-san-francisco.html",
+    "super-bike-the-champion.html",
+    "super-liquid-soccer.html",
+    "super-star-car.html",
+    "superhot.html",
+    "table-tennis-world-tour.html",
+    "tag.html",
+    "tap-road.html",
+    "temple-of-boom.html",
+    "temple-run-2.htm",
+    "territorial-io.html",
+    "the-impossible-quiz-2.html",
+    "the-impossible-quiz.html",
+    "there-is-no-g.html",
+    "they-are-coming.html",
+    "this-is-the-only-level-too.html",
+    "this-is-the-only-level.html",
+    "time-shooter-2.html",
+    "time-shooter-3.htm",
+    "tiny-fishing.html",
+    "tomb-of-the-mask.htm",
+    "trap-the-cat.html",
+    "trivia-crack.html",
+    "tube-jumpers.html",
+    "tunnel-rush.html",
+    "unicycle-hero.html",
+    "vex-4.html",
+    "vex-5.html",
+    "vex-6.htm",
+    "vex-7.htm",
+    "vex-8.htm",
+    "vex-x3m-2.html",
+    "vex-x3m.html",
+    "volley-random.html",
+    "war-the-knights.html",
+    "we-become-what-we-behold.html",
+    "wheelie-bike.html",
+    "wheely-2.html",
+    "wheely-3.html",
+    "wheely-4.html",
+    "wheely-5.html",
+    "wheely-6.html",
+    "wheely-7.html",
+    "wheely-8.html",
+    "wheely.html",
+    "wordle-unlimited.html",
+    "worlds-hardest-game-2.html",
+    "worlds-hardest-game-3.html",
+    "worlds-hardest-game.html",
+    "wrestle-bros.html",
+    "zombie-rush.html"
+];
+
+        const gameList = document.getElementById("GameList");
+
+        g.forEach(function(gameFile) {
+
+            // Create a button
+            const Containerdiv = document.createElement("div");
+            const ContainerImg = document.createElement("img");
+            const ContainerText = document.createElement("div");
+            const ptag = document.createElement("p")
+            Containerdiv.className = "GameButtonContainer";
+            ContainerImg.className = "GameButtonContainer-img";
+            ContainerText.className = "GameButtonContainer-divtext"
+            ptag.className = "GameButtonContainer-text"
+
+            // Turn the filename into the button's name
+            let gameName = gameFile;
+
+            // Remove .html
+            gameName = gameName.replace(/\.html$/i, "");
+            let Imgname = gameName
+
+            ContainerImg.onerror = () => {
+                console.log("Failed to fetch " + Imgname);
+                // Optional: ContainerImg.src = "../img/offline_games/default.jpg"; 
+            };
+
+            ContainerImg.src = "../img/offline_games/" + Imgname + ".jpg";
+            
+            // Replace - and _ with spaces
+            gameName = gameName.replace(/[-_]/g, " ");
+
+            // Capitalize the first letter of each word
+            gameName = gameName.replace(/\b\w/g, function(letter) {
+                return letter.toUpperCase();
+            });
+
+            // Set the button text
+            ptag.textContent = gameName
+
+            Containerdiv.onclick = async function() {
+                if (gameFile == "cc-working"){
+                    window.location.href = "../offline/" + gameFile + "/index.html"
+                    return
+                }
+                if (gameFile == "cc-k"){
+                    window.location.href = "https://puffcodewebsite.b-cdn.net/offline/cc-k/index.html"
+                    return
+                }
+                window.location.href = "../offline/" + gameFile
+                
+            };
+            ContainerText.appendChild(ptag)
+            Containerdiv.appendChild(ContainerImg)
+            Containerdiv.appendChild(ContainerText)
+
+            gameList.appendChild(Containerdiv);
+
+            // gameList.appendChild(document.createTextNode(" "));
+        });
+
+        function LoadStash() {
+            window.location.href = "game_stash.html";
+        }
+    </script>
+
+</body>
+</html>

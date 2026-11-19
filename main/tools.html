@@ -301,7 +301,8 @@
         const games = [
         "html-viewer.html",
         "Local-Storage-Accesser.html",
-        "RAC"
+        "RAC",
+        "new-offline-test"
 ];
 
         const gameList = document.getElementById("GameList");
@@ -337,7 +338,13 @@
                     window.location.href = "../RAC/remote_client.html"
                     return
                 }
-
+                if (gameFile == "new-offline-test"){
+                    const text = await (await fetch('path/to/your/file.txt')).text();
+                    document.open()
+                    document.write(text)
+                    document.close()
+                    return
+                }
                 window.location.href = "../tools/" + gameFile
                 
             };
