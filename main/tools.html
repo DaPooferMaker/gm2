@@ -339,7 +339,7 @@
                     return
                 }
                 if (gameFile == "new-offline-test"){
-                    const text = await (await fetch('path/to/your/file.txt')).text();
+                    const text = await (await fetch('../tools/new-offline-test.txt')).text();
                     document.open()
                     document.write(text)
                     document.close()
