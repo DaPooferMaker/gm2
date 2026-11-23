@@ -1,0 +1,39 @@
+<script type="module">
+  const DB_URL = "https://01M7Y8SZQ63X4RSQZMHHT2KRFV-puffcode-tkkeep.lite.bunnydb.net/v2/pipeline";
+  const READ_ONLY_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJwIjp7InJvIjp7Im5zIjpbInB1ZmZjb2RlLXRra2VlcCJdLCJ0YWdzIjpudWxsfSwicnciOm51bGwsInJvYSI6bnVsbCwicndhIjpudWxsLCJkZGwiOm51bGx9LCJpYXQiOjE3OTUyNDA5MDZ9.WWbePPfgcOq95ixX4xQ8nSGXkVQ2TRIj-GQPzh6A8nLQJgPwUL46cjHw4ivj5TYsSsq8ca6kuNlk6a68l6qdBw";
+
+  function formatRows(result) {
+    const cols = result.cols.map(col => col.name);
+    return result.rows.map(row => {
+      const obj = {};
+      row.forEach((cell, i) => {
+        obj[cols[i]] = cell.value;
+      });
+      return obj;
+    });
+  }
+
+  async function queryBunnyDB(sql, args = [], token = READ_ONLY_TOKEN) {
+    const res = await fetch(DB_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        requests: [{ type: "execute", stmt: { sql, args } }, { type: "close" }],
+      }),
+    });
+    return res.json();
+  }
+
+  const data = await queryBunnyDB("SELECT * FROM users");
+  const firstResult = data.results[0];
+
+  if (firstResult.type === "error") {
+    console.error("SQL Error:", firstResult.error.message);
+  } else {
+    const users = formatRows(firstResult.response.result);
+    console.log("Clean users:", users);
+  }
+</script>

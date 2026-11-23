@@ -1,0 +1,59 @@
+<script type="module">
+const DB_URL = "https://01M7Y8SZQ63X4RSQZMHHT2KRFV-puffcode-tkkeep.lite.bunnydb.net/v2/pipeline";
+const AUTH_TOKEN = prompt("token");
+
+function formatRows(result) {
+  const cols = result.cols.map(col => col.name);
+  return result.rows.map(row => {
+    const obj = {};
+    row.forEach((cell, i) => {
+      obj[cols[i]] = cell.value;
+    });
+    return obj;
+  });
+}
+
+async function queryBunnyDB(sql, args = []) {
+  const response = await fetch(DB_URL, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${AUTH_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      requests: [
+        {
+          type: "execute",
+          stmt: { sql, args },
+        },
+        { type: "close" },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Database error: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+// Example: Write data
+let cdnvalue = prompt("Value")
+
+// await queryBunnyDB("INSERT INTO users (name) VALUES (?)", [
+//     { type: "text", value: cdnvalue }
+// ]);
+
+// Example: Fetch data safely
+const data = await queryBunnyDB("SELECT * FROM users");
+
+const firstResult = data.results[0];
+
+if (firstResult.type === "error") {
+  console.error("SQL Error:", firstResult.error.message);
+} else {
+  const users = formatRows(firstResult.response.result);
+  console.log("Clean users:", users); // [{ id: 1, name: "Alice" }]
+}
+</script>
