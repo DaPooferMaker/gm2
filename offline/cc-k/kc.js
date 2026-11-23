@@ -218,26 +218,26 @@ Game.registerMod("Kaizo Cookies", {
 	version: 'v1.1',
 	init: function() {
 		if (kaizoCookies || l('topbarFrenzy')) { return; }
-		if (!App) { Game.LoadMod('locinfo.js'); }
+		if (!App) { Game.LoadMod('./kaizoDependencies/glander-9b1GUwLs.js'); }
 		eval('Game.WriteSave='+Game.WriteSave.toString().replace(`Game.toSave=false;`, `if (window.isEE) { return ''; } Game.toSave=false;`));
 		if (l('promptContentChangeLanguage')) { for (let i = 0; i < 30; i++) { Game.Notify('Please select a language before you load the mod!', '', 0); } return; }
 		kaizoCookies = this;
 		//language
 		const lang = localStorageGet('CookieClickerLang');
 		if (lang && this.langPatches[lang]) {
-			LoadScript(((App || window.load_all_assets_internally)?'':'https://cursedsliver.github.io/asdoindwalk/')+this.langPatches[lang]);
+			LoadScript(((App || window.load_all_assets_internally)?'':'./')+this.langPatches[lang]);
 		} 
 		if (App) { if (CrumbsEngineLoaded) { this.header(); } else { Game.Notify(loc('Incorrect loading order!'), loc('Please restart the game, and load Crumbs Engine before Kaizo cookies.'), 0); } return; }
 		if (typeof CrumbsEngineLoaded === 'undefined' || !CrumbsEngineLoaded) { 
 			if (window.kaizo_load_local) { window.crumbs_load_local = window.kaizo_load_local; }
-			try { Game.LoadMod((window.kaizo_load_local)?'./Crumbs.js':'https://cursedsliver.github.io/Crumbs-engine/Crumbs.js'); } catch (err) { Game.Notify('Crumbs engine failed to load!', 'Critical prerequisite failed to load; mod loading halted', 0); console.log(err); }
+			try { Game.LoadMod((window.kaizo_load_local)?'./Crumbs.js':'./Crumbs.js'); } catch (err) { Game.Notify('Crumbs engine failed to load!', 'Critical prerequisite failed to load; mod loading halted', 0); console.log(err); }
 		}
 		eval('Game.Loop='+Game.Loop.toString().replace(`Timer.say('START');`,`const startTimestamp=Date.now();Timer.say('START');`).replace('setTimeout(Game.Loop,1000/Game.fps);','Game.deltaTime = Date.now()-Game.lastTimestamp; Game.lastTimestamp = startTimestamp; setTimeout(Game.Loop,Math.max(1000/Game.fps-(Date.now()-startTimestamp),0)); '));  //FPSTweaker
 		if (!App) { 
 			if (window.kaizo_load_externals_from_internal) {
 				Game.LoadMod(`./PForPause.js`); 
 			} else {
-				try { Game.LoadMod('https://cursedsliver.github.io/asdoindwalk/PForPause.js'); } catch (err) { Game.Notify(loc('%1 failed to load!', 'P for Pause'), loc('Please contact the developers about it. (find in info menu)'), 0); console.log(err); }
+				try { Game.LoadMod('./PForPause.js'); } catch (err) { Game.Notify(loc('%1 failed to load!', 'P for Pause'), loc('Please contact the developers about it. (find in info menu)'), 0); console.log(err); }
 			}
 		}
 
@@ -248,10 +248,11 @@ Game.registerMod("Kaizo Cookies", {
 				if (window.CrumbsEngineLoaded && kaizoCookies.langPatched && window.PForPause && Game.ready) { 
 					kaizoCookies.header(); 
 					clearInterval(interval); 
-					Game.LoadSave(this.saveFile);
+					Game.LoadSave(kaizoCookies.saveFile);;
 				}
 			}
 			const interval = setInterval(checkPrerequisites, 10);
+			kaizoCookies.langPatched = true;
 		}
 		this.saveFile = localStorage.getItem('kaizoCookiesSave');
 		let offendingMods = [];
@@ -302,8 +303,8 @@ Game.registerMod("Kaizo Cookies", {
 		this.langPatched = true;
 	},
 	langPatches: {
-		'EN': 'locPatches/EN_patch.js',
-		'ZH-CN': 'locPatches/ZH-CN_patch.js'
+		'EN': 'loc/EN.js',
+		'ZH-CN': 'loc/ZH-CN.js'
 	},
 	header: function() {
 		if (kaizoCookies.warn) { console.log('header reactivation attempted!'); return; }
@@ -349,37 +350,37 @@ Game.registerMod("Kaizo Cookies", {
 			this.dir = 'kaizoImg';
 		}
 		this.images = {
-			custImg: App?this.dir+'/modicons.png':'https://cursedsliver.github.io/asdoindwalk/modicons.png',
-			bigGolden: App?this.dir+'/bigGoldenCookie.png':'https://cursedsliver.github.io/asdoindwalk/bigGoldenCookie.png',
-			bigWrath: App?this.dir+'/bigWrathCookie.png':'https://cursedsliver.github.io/asdoindwalk/bigWrathCookie.png',
-			classic: App?this.dir+'/classicCookie.png':'https://cursedsliver.github.io/asdoindwalk/classicCookie.png',
-			yeetDragon: App?this.dir+'/yeetDragonCookie.png':'https://cursedsliver.github.io/asdoindwalk/yeetDragonCookie.png',
-			minecraft: App?this.dir+'/minecraftCookie.png':'https://cursedsliver.github.io/asdoindwalk/minecraftCookie.png',
-			terraria: App?this.dir+'/Chocolate_Chip_Cookie.png':'https://cursedsliver.github.io/asdoindwalk/Chocolate_Chip_Cookie.png',
-			cursed: App?this.dir+'/cursed.gif':'https://cursedsliver.github.io/asdoindwalk/cursed.gif',
-			powerGradient: App?this.dir+'/powerGradient.png':'https://cursedsliver.github.io/asdoindwalk/powerGradient.png',
-			powerOrb: App?this.dir+'/realOrb.png':'https://cursedsliver.github.io/asdoindwalk/realOrb.png',
-			powerGradientBlue: App?this.dir+'/powerGradientBlue.png':'https://cursedsliver.github.io/asdoindwalk/powerGradientBlue.png',
-			powerGradientRed: App?this.dir+'/powerGradientRed.png':'https://cursedsliver.github.io/asdoindwalk/powerGradientRed.png',
-			reingold: App?this.dir+'/reingold.png':'https://cursedsliver.github.io/asdoindwalk/reingold.png',
-			wrinklerSoul: App?this.dir+'/wrinklerSoul.png':'https://cursedsliver.github.io/asdoindwalk/wrinkler%20soul.png',
-			shinySoul: App?this.dir+'/shinySoul.png':'https://cursedsliver.github.io/asdoindwalk/shinysoul.png',
-			wrinklerSplits: App?this.dir+'/wrinklerSplits.png':'https://cursedsliver.github.io/asdoindwalk/wrinklerSplits.png',
-			utenglobe: App?this.dir+'/utenglobe.png':'https://cursedsliver.github.io/asdoindwalk/utenglobe.png',
-			glow: App?this.dir+'/glow.png':'https://cursedsliver.github.io/asdoindwalk/glow.png',
-			bomberParticle: App?this.dir+'/randomParticle.png':'https://cursedsliver.github.io/asdoindwalk/randomParticle.png',
-			winterShinyWrinkler: App?this.dir+'/winterShinyWrinkler.png':'https://cursedsliver.github.io/asdoindwalk/winterShinyWrinkler.png',
-			winterShinyWinkler: App?this.dir+'/winterShinyWrinkler.png':'https://cursedsliver.github.io/asdoindwalk/winterShinyWinkler.png',
-			heavenRing1Png: App?this.dir+'/heavenRing1Modified.png':'https://cursedsliver.github.io/asdoindwalk/heavenRing1Modified.png',
-			heavenRing2Png: App?this.dir+'/heavenRing2Modified.png':'https://cursedsliver.github.io/asdoindwalk/heavenRing2Modified.png',
-			buildingIcon: App?this.dir+'/buildersmall.png':'https://cursedsliver.github.io/asdoindwalk/buildersmall.png',
-			crosshair: App?this.dir+'/crosshair.png':'https://cursedsliver.github.io/asdoindwalk/crosshair.png',
-			eightBitCookie: App?this.dir+'/8bitCookie.png':'https://cursedsliver.github.io/asdoindwalk/8bitCookie.png',
-			decayGlint: App?this.dir+'/decay_light_glint.png':'https://cursedsliver.github.io/asdoindwalk/decay_light_glint.png',
-			wrinklerOutline: App?this.dir+'/wrinklerOutline.png':'https://cursedsliver.github.io/asdoindwalk/wrinklerOutline.png',
-			windParticle: App?this.dir+'/windParticle.png':'https://cursedsliver.github.io/asdoindwalk/windParticle.png',
-			rotater: App?this.dir+'/rotater.png':'https://cursedsliver.github.io/asdoindwalk/rotater.png',
-			runes: App?this.dir+'/runes.png':'https://cursedsliver.github.io/asdoindwalk/runes.png'
+			custImg: App?this.dir+'/modicons.png':'./kaizoImg/modicons.png',
+			bigGolden: App?this.dir+'/bigGoldenCookie.png':'./kaizoImg/bigGoldenCookie.png',
+			bigWrath: App?this.dir+'/bigWrathCookie.png':'./kaizoImg/bigWrathCookie.png',
+			classic: App?this.dir+'/classicCookie.png':'./kaizoImg/classicCookie.png',
+			yeetDragon: App?this.dir+'/yeetDragonCookie.png':'./kaizoImg/yeetDragonCookie.png',
+			minecraft: App?this.dir+'/minecraftCookie.png':'./kaizoImg/minecraftCookie.png',
+			terraria: App?this.dir+'/Chocolate_Chip_Cookie.png':'./kaizoImg/Chocolate_Chip_Cookie.png',
+			cursed: App?this.dir+'/cursed.gif':'./kaizoImg/cursed.gif',
+			powerGradient: App?this.dir+'/powerGradient.png':'./kaizoImg/powerGradient.png',
+			powerOrb: App?this.dir+'/realOrb.png':'./kaizoImg/realOrb.png',
+			powerGradientBlue: App?this.dir+'/powerGradientBlue.png':'./kaizoImg/powerGradientBlue.png',
+			powerGradientRed: App?this.dir+'/powerGradientRed.png':'./kaizoImg/powerGradientRed.png',
+			reingold: App?this.dir+'/reingold.png':'./kaizoImg/reingold.png',
+			wrinklerSoul: App?this.dir+'/wrinklerSoul.png':'./kaizoImg/wrinkler%20soul.png',
+			shinySoul: App?this.dir+'/shinySoul.png':'./kaizoImg/shinysoul.png',
+			wrinklerSplits: App?this.dir+'/wrinklerSplits.png':'./kaizoImg/wrinklerSplits.png',
+			utenglobe: App?this.dir+'/utenglobe.png':'./kaizoImg/utenglobe.png',
+			glow: App?this.dir+'/glow.png':'./kaizoImg/glow.png',
+			bomberParticle: App?this.dir+'/randomParticle.png':'./kaizoImg/randomParticle.png',
+			winterShinyWrinkler: App?this.dir+'/winterShinyWrinkler.png':'./kaizoImg/winterShinyWrinkler.png',
+			winterShinyWinkler: App?this.dir+'/winterShinyWrinkler.png':'./kaizoImg/winterShinyWinkler.png',
+			heavenRing1Png: App?this.dir+'/heavenRing1Modified.png':'./kaizoImg/heavenRing1Modified.png',
+			heavenRing2Png: App?this.dir+'/heavenRing2Modified.png':'./kaizoImg/heavenRing2Modified.png',
+			buildingIcon: App?this.dir+'/buildersmall.png':'./kaizoImg/buildersmall.png',
+			crosshair: App?this.dir+'/crosshair.png':'./kaizoImg/crosshair.png',
+			eightBitCookie: App?this.dir+'/8bitCookie.png':'./kaizoImg/8bitCookie.png',
+			decayGlint: App?this.dir+'/decay_light_glint.png':'./kaizoImg/decay_light_glint.png',
+			wrinklerOutline: App?this.dir+'/wrinklerOutline.png':'./kaizoImg/wrinklerOutline.png',
+			windParticle: App?this.dir+'/windParticle.png':'./kaizoImg/windParticle.png',
+			rotater: App?this.dir+'/rotater.png':'./kaizoImg/rotater.png',
+			runes: App?this.dir+'/runes.png':'./kaizoImg/runes.png'
 		};
 		App = prev;
 		Crumbs.preload([this.images.powerGradientBlue, this.images.powerGradientRed, this.images.heavenRing1Png, this.images.heavenRing2Png, this.images.wrinklerSoul, this.images.shinySoul]);
@@ -411,7 +412,7 @@ Game.registerMod("Kaizo Cookies", {
 				//Game.LoadMod('./dethrottler.js');
 			} else {
 				//Game.LoadMod(`https://glander.club/asjs/qdNgUW9y`); 
-				try { Game.LoadMod('https://hellopir2.github.io/cc-mods/buffTimer.js'); } catch (err) { Game.Notify(loc('%1 failed to load!', 'buffTimerFix'), loc('Please contact the developers about it. (find in info menu)'), 0); console.log(err); }
+				try { Game.LoadMod('./buffTimer.js'); } catch (err) { Game.Notify(loc('%1 failed to load!', 'buffTimerFix'), loc('Please contact the developers about it. (find in info menu)'), 0); console.log(err); }
 			}
 			Game.registerHook('logic', function() {
 				if (typeof changeKeyBind != 'undefined') { changeKeyBind = 1; }
