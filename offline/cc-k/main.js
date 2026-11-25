@@ -354,7 +354,7 @@ var loc=function(id,params,baseline)
 	
 	//if ((fallback || !found) && localizationNotFound.length<20 && localizationNotFound.indexOf(id)==-1){localizationNotFound.push(id);console.trace('localization string not found: ',id);}
 	if (found) return str;
-	return baseline||id;
+	return parseLoc(baseline||id, params);
 }
 
 var parseLoc=function(str,params)
